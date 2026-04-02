@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Blood Donor App",
+    "slug": "blood-donor-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./public/assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./public/assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./public/assets/icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "favicon": "./public/assets/logo.png"
+    }
+  }
+}
