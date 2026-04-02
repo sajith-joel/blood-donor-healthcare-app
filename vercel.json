@@ -1,5 +1,17 @@
 {
   "buildCommand": "npm run build:web",
   "outputDirectory": "web-build",
-  "framework": null
+  "devCommand": "expo start",
+  "installCommand": "npm install --legacy-peer-deps",
+  "framework": null,
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
 }
