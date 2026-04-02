@@ -4,10 +4,10 @@
     "slug": "blood-donor-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./public/assets/icon.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./public/assets/splash.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -19,12 +19,12 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./public/assets/icon.png",
+        "foregroundImage": "./public//icon.png",
         "backgroundColor": "#ffffff"
       }
     },
     "web": {
-      "favicon": "./public/assets/logo.png"
+      "favicon": "./public//logo.png"
     }
   }
 }
