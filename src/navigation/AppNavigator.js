@@ -87,7 +87,7 @@ export default function AppNavigator() {
   const { user, userType, loading } = useAuth();
 
   if (loading) {
-    return null; // Or a splash screen
+    return null;
   }
 
   if (!user) {
