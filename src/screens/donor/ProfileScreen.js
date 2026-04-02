@@ -108,9 +108,9 @@ export default function ProfileScreen() {
         <TouchableOpacity onPress={pickImage}>
           <View style={styles.avatarContainer}>
             <Image
-              source={require('../../../assets/logo.png')}
+              source={require('../../../public/assets/logo.png')}
               style={styles.avatar}
-              defaultSource={require('../../../assets/icon.png')}
+              defaultSource={require('../../../public/assets/icon.png')}
             />
             <View style={styles.editIcon}>
               <Text style={styles.editIconText}>📷</Text>
