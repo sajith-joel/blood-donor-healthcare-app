@@ -1,20 +1,26 @@
 import * as Notifications from 'expo-notifications';
 import { Platform, Alert } from 'react-native';
-import { functions } from './firebaseConfig';
-import { httpsCallable } from 'firebase/functions';
 import { db } from './firebaseConfig';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, updateDoc } from 'firebase/firestore';
 
+// Configure notification handler
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
+    shouldPlaySound: Platform.OS !== 'web',
+    shouldSetBadge: Platform.OS !== 'web',
   }),
 });
 
 export const registerForPushNotifications = async (userId) => {
   try {
+    // For web, we need VAPID key configured in app.json
+    // If not configured, skip registration
+    if (Platform.OS === 'web') {
+      console.log('Web push notifications require VAPID key in app.json');
+      return null;
+    }
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
     
@@ -29,16 +35,7 @@ export const registerForPushNotifications = async (userId) => {
     }
     
     const token = (await Notifications.getExpoPushTokenAsync()).data;
-    console.log('Expo push token:', token);
-    
-    if (Platform.OS === 'android') {
-      Notifications.setNotificationChannelAsync('blood-donations', {
-        name: 'Blood Donations',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FF231F7C',
-      });
-    }
+    console.log('Push token:', token);
     
     // Save token to Firestore
     const userRef = doc(db, 'users', userId);
@@ -54,77 +51,17 @@ export const registerForPushNotifications = async (userId) => {
   }
 };
 
-export const sendPushNotification = async (expoPushToken, title, body, data = {}) => {
-  const message = {
-    to: expoPushToken,
-    sound: 'default',
-    title: title,
-    body: body,
-    data: data,
-  };
-
-  try {
-    const response = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    });
-    
-    const result = await response.json();
-    return { success: true, result };
-  } catch (error) {
-    console.error('Error sending push notification:', error);
-    return { success: false, error };
-  }
-};
-
-export const sendBulkNotifications = async (donors, requestInfo) => {
-  const results = [];
-  for (const donor of donors) {
-    if (donor.pushToken) {
-      const result = await sendPushNotification(
-        donor.pushToken,
-        `Urgent: ${requestInfo.bloodGroup} Blood Needed`,
-        `${requestInfo.hospitalName} needs ${requestInfo.bloodGroup} blood urgently. Distance: ${donor.distance?.toFixed(1)}km away.`,
-        {
-          requestId: requestInfo.requestId,
-          bloodGroup: requestInfo.bloodGroup,
-          type: 'blood_request',
-          hospitalName: requestInfo.hospitalName
-        }
-      );
-      results.push(result);
-    }
-  }
-  return results;
-};
-
 export const sendLocalNotification = async (title, body) => {
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body,
-      sound: true,
-      priority: Notifications.AndroidNotificationPriority.HIGH,
-    },
-    trigger: null,
-  });
-};
-
-export const scheduleDonationReminder = async (days = 90) => {
-  const trigger = new Date();
-  trigger.setDate(trigger.getDate() + days);
-  
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: 'Time to Donate Blood Again!',
-      body: 'You can now donate blood again. Your donation can save lives!',
-      sound: true,
-    },
-    trigger,
-  });
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: Platform.OS !== 'web',
+      },
+      trigger: null,
+    });
+  } catch (error) {
+    console.error('Error sending local notification:', error);
+  }
 };

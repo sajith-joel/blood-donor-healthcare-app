@@ -29,6 +29,7 @@ export default function NearbyRequestScreen({ navigation }) {
     try {
       const location = await getCurrentLocation();
       setUserLocation(location);
+      // Using getActiveRequests function
       const nearbyRequests = await getActiveRequests(location, filterBloodGroup);
       setRequests(nearbyRequests);
     } catch (error) {
