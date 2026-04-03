@@ -35,6 +35,8 @@ export default function HospitalDashboard({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [hospitalLocation, setHospitalLocation] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedDonors, setSelectedDonors] = useState(null);
+  const [showDonorModal, setShowDonorModal] = useState(false);
   const [formData, setFormData] = useState({
     bloodGroup: '',
     quantity: '1',
@@ -80,7 +82,10 @@ export default function HospitalDashboard({ navigation }) {
     return onSnapshot(q, (snapshot) => {
       const requestsList = [];
       snapshot.forEach((doc) => {
-        requestsList.push({ id: doc.id, ...doc.data() });
+        const data = doc.data();
+        console.log('Request data:', doc.id, data);
+        console.log('Donor responses:', data.donorResponses);
+        requestsList.push({ id: doc.id, ...data });
       });
       setRequests(requestsList);
       setLoading(false);
@@ -110,6 +115,7 @@ export default function HospitalDashboard({ navigation }) {
       const requestData = {
         hospitalId: user.uid,
         hospitalName: user.displayName || 'City Hospital',
+        hospitalEmail: user.email,
         bloodGroup: formData.bloodGroup,
         quantity: parseInt(formData.quantity),
         department: formData.department,
@@ -178,6 +184,11 @@ export default function HospitalDashboard({ navigation }) {
     );
   };
 
+  const viewDonorDetails = (donors) => {
+    setSelectedDonors(donors);
+    setShowDonorModal(true);
+  };
+
   const activeRequests = requests.filter(r => r.status === 'active');
   const fulfilledRequests = requests.filter(r => r.status === 'fulfilled');
 
@@ -195,7 +206,7 @@ export default function HospitalDashboard({ navigation }) {
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>🏥 Hospital Dashboard</Text>
-          <Text style={styles.subtitle}>Welcome, {user?.displayName || 'Hospital'}</Text>
+          <Text style={styles.subtitle}>Welcome, {user?.displayName || user?.email || 'Hospital'}</Text>
         </View>
         <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
           <Icon name="logout" size={24} color="#d32f2f" />
@@ -223,51 +234,86 @@ export default function HospitalDashboard({ navigation }) {
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View style={styles.requestCard}>
-            <View style={styles.bloodGroupCircle}>
-              <Text style={styles.bloodGroupText}>{item.bloodGroup}</Text>
-            </View>
-            <View style={styles.requestInfo}>
-              <Text style={styles.departmentText}>{item.department || 'Blood Bank'}</Text>
-              <Text style={styles.quantityText}>Need {item.quantity} unit(s)</Text>
-              <Text style={styles.urgencyText}>Urgency: {item.urgency}</Text>
-              <Text style={styles.radiusText}>Search radius: {item.radius}km</Text>
-              
-              {/* Donor Responses Section */}
-              <View style={styles.donorResponsesSection}>
-                <Text style={styles.responseCount}>
-                  👥 {item.donorResponses?.length || 0} donor(s) responded
-                </Text>
-                {item.donorResponses && item.donorResponses.length > 0 && (
-                  <View style={styles.responseList}>
-                    <Text style={styles.responseListTitle}>📋 Donor Details:</Text>
-                    {item.donorResponses.map((response, idx) => (
-                      <View key={idx} style={styles.responseCard}>
-                        <Text style={styles.responseName}>🩸 {response.donorName}</Text>
-                        <Text style={styles.responseDetail}>Blood Group: {response.bloodGroup}</Text>
-                        <Text style={styles.responseDetail}>📞 Phone: {response.phone}</Text>
-                        <Text style={styles.responseDetail}>📧 Email: {response.email}</Text>
-                        <Text style={styles.responseTime}>
-                          Responded: {response.respondedAt?.toDate().toLocaleString()}
-                        </Text>
-                      </View>
-                    ))}
+            <View style={styles.requestHeader}>
+              <View style={styles.bloodGroupCircle}>
+                <Text style={styles.bloodGroupText}>{item.bloodGroup}</Text>
+              </View>
+              <View style={styles.requestHeaderInfo}>
+                <Text style={styles.departmentText}>{item.department || 'Blood Bank'}</Text>
+                <Text style={styles.quantityText}>Need {item.quantity} unit(s)</Text>
+                <View style={[styles.urgencyBadge, { backgroundColor: urgencyLevels.find(u => u.value === item.urgency)?.color || '#4caf50' }]}>
+                  <Text style={styles.urgencyText}>{item.urgency.toUpperCase()}</Text>
+                </View>
+                {item.isRare && (
+                  <View style={styles.rareBadge}>
+                    <Text style={styles.rareText}>⭐ RARE BLOOD</Text>
                   </View>
                 )}
               </View>
             </View>
-            <View style={styles.buttonGroup}>
-              <TouchableOpacity 
-                style={styles.fulfillButton}
-                onPress={() => updateRequestStatus(item.id, 'fulfilled')}
-              >
-                <Text style={styles.buttonText}>✓</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.cancelButton}
-                onPress={() => updateRequestStatus(item.id, 'cancelled')}
-              >
-                <Text style={styles.buttonText}>✗</Text>
-              </TouchableOpacity>
+
+            {/* Donor Responses Section - This is where donor details appear */}
+            <View style={styles.donorSection}>
+              <Text style={styles.donorSectionTitle}>
+                👥 Donor Responses ({item.donorResponses?.length || 0})
+              </Text>
+              
+              {item.donorResponses && item.donorResponses.length > 0 ? (
+                <View>
+                  {item.donorResponses.map((donor, idx) => (
+                    <View key={idx} style={styles.donorCard}>
+                      <View style={styles.donorHeader}>
+                        <Text style={styles.donorName}>🩸 {donor.donorName}</Text>
+                        <Text style={styles.donorBlood}>{donor.bloodGroup}</Text>
+                      </View>
+                      <View style={styles.donorDetails}>
+                        <Text style={styles.donorDetail}>📞 Phone: {donor.phone || 'Not provided'}</Text>
+                        <Text style={styles.donorDetail}>📧 Email: {donor.email || 'Not provided'}</Text>
+                        <Text style={styles.donorTime}>
+                          Responded: {donor.respondedAt?.toDate().toLocaleString() || 'Just now'}
+                        </Text>
+                      </View>
+                      <TouchableOpacity 
+                        style={styles.contactButton}
+                        onPress={() => {
+                          Alert.alert(
+                            'Contact Donor',
+                            `Name: ${donor.donorName}\nPhone: ${donor.phone}\nEmail: ${donor.email}\n\nYou can contact them using these details.`
+                          );
+                        }}
+                      >
+                        <Icon name="call" size={16} color="#fff" />
+                        <Text style={styles.contactButtonText}>Contact</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.noDonorsContainer}>
+                  <Text style={styles.noDonorsText}>No donors have responded yet</Text>
+                  <Text style={styles.noDonorsSubtext}>Donors will appear here when they respond</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.requestFooter}>
+              <Text style={styles.timeText}>
+                Created: {item.createdAt?.toDate().toLocaleString() || 'Just now'}
+              </Text>
+              <View style={styles.buttonGroup}>
+                <TouchableOpacity 
+                  style={styles.fulfillButton}
+                  onPress={() => updateRequestStatus(item.id, 'fulfilled')}
+                >
+                  <Text style={styles.buttonText}>✓ Mark Fulfilled</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.cancelButton}
+                  onPress={() => updateRequestStatus(item.id, 'cancelled')}
+                >
+                  <Text style={styles.buttonText}>✗ Cancel</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         )}
@@ -370,13 +416,38 @@ export default function HospitalDashboard({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* Donor Details Modal */}
+      <Modal visible={showDonorModal} animationType="slide" transparent={true}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Donor Details</Text>
+              <TouchableOpacity onPress={() => setShowDonorModal(false)}>
+                <Icon name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView>
+              {selectedDonors?.map((donor, idx) => (
+                <View key={idx} style={styles.donorDetailCard}>
+                  <Text style={styles.donorDetailName}>🩸 {donor.donorName}</Text>
+                  <Text style={styles.donorDetailBlood}>Blood Group: {donor.bloodGroup}</Text>
+                  <Text style={styles.donorDetailPhone}>📞 {donor.phone || 'No phone'}</Text>
+                  <Text style={styles.donorDetailEmail}>📧 {donor.email || 'No email'}</Text>
+                  <Text style={styles.donorDetailTime}>Responded: {donor.respondedAt?.toDate().toLocaleString()}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' },
   loadingText: { marginTop: 10, color: '#666' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
   title: { fontSize: 24, fontWeight: 'bold', color: '#d32f2f' },
@@ -386,27 +457,38 @@ const styles = StyleSheet.create({
   statCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, alignItems: 'center', minWidth: 100, elevation: 2 },
   statNumber: { fontSize: 28, fontWeight: 'bold', color: '#d32f2f' },
   statLabel: { fontSize: 12, color: '#666', marginTop: 5 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 15, marginTop: 10 },
-  requestCard: { flexDirection: 'row', backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, alignItems: 'flex-start', elevation: 2 },
-  bloodGroupCircle: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  bloodGroupText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  requestInfo: { flex: 1 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 15, marginTop: 10, marginBottom: 5 },
+  requestCard: { backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, elevation: 2 },
+  requestHeader: { flexDirection: 'row', marginBottom: 15 },
+  bloodGroupCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  bloodGroupText: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  requestHeaderInfo: { flex: 1 },
   departmentText: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  quantityText: { fontSize: 12, color: '#666', marginTop: 2 },
-  urgencyText: { fontSize: 12, color: '#ff9800', marginTop: 2 },
-  radiusText: { fontSize: 11, color: '#4caf50', marginTop: 2 },
-  donorResponsesSection: { marginTop: 8 },
-  responseCount: { fontSize: 12, color: '#2196f3', fontWeight: '500', marginTop: 4 },
-  responseList: { marginTop: 8 },
-  responseListTitle: { fontSize: 11, fontWeight: 'bold', color: '#666', marginBottom: 6 },
-  responseCard: { backgroundColor: '#f9f9f9', padding: 10, borderRadius: 8, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#d32f2f' },
-  responseName: { fontSize: 13, fontWeight: 'bold', color: '#333', marginBottom: 4 },
-  responseDetail: { fontSize: 11, color: '#666', marginBottom: 2 },
-  responseTime: { fontSize: 10, color: '#999', marginTop: 4 },
+  quantityText: { fontSize: 14, color: '#666', marginTop: 2 },
+  urgencyBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start', marginTop: 6 },
+  urgencyText: { color: '#fff', fontWeight: 'bold', fontSize: 10 },
+  rareBadge: { backgroundColor: '#ff9800', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start', marginTop: 4 },
+  rareText: { color: '#fff', fontWeight: 'bold', fontSize: 10 },
+  donorSection: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
+  donorSectionTitle: { fontSize: 14, fontWeight: 'bold', color: '#333', marginBottom: 10 },
+  donorCard: { backgroundColor: '#f9f9f9', padding: 12, borderRadius: 10, marginBottom: 10, borderLeftWidth: 3, borderLeftColor: '#d32f2f' },
+  donorHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  donorName: { fontSize: 14, fontWeight: 'bold', color: '#333' },
+  donorBlood: { fontSize: 12, fontWeight: 'bold', color: '#d32f2f' },
+  donorDetails: { marginBottom: 8 },
+  donorDetail: { fontSize: 12, color: '#666', marginBottom: 2 },
+  donorTime: { fontSize: 10, color: '#999', marginTop: 4 },
+  contactButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#4caf50', paddingVertical: 6, borderRadius: 6, marginTop: 6 },
+  contactButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold', marginLeft: 4 },
+  noDonorsContainer: { alignItems: 'center', padding: 20 },
+  noDonorsText: { fontSize: 14, color: '#999' },
+  noDonorsSubtext: { fontSize: 12, color: '#ccc', marginTop: 4 },
+  requestFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
+  timeText: { fontSize: 10, color: '#999' },
   buttonGroup: { flexDirection: 'row', gap: 8 },
-  fulfillButton: { backgroundColor: '#4caf50', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  cancelButton: { backgroundColor: '#d32f2f', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  fulfillButton: { backgroundColor: '#4caf50', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  cancelButton: { backgroundColor: '#d32f2f', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  buttonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
   emptyContainer: { alignItems: 'center', padding: 50 },
   emptyText: { fontSize: 16, color: '#999', marginTop: 10 },
   emptySubtext: { fontSize: 14, color: '#999', marginTop: 5 },
@@ -417,7 +499,7 @@ const styles = StyleSheet.create({
   inputLabel: { fontSize: 14, fontWeight: '600', color: '#333', marginTop: 15, marginBottom: 5 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#fff' },
   textArea: { height: 80, textAlignVertical: 'top' },
-  bloodGroupGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  bloodGroupGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10 },
   bloodGroupOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#f0f0f0', margin: 4 },
   bloodGroupSelected: { backgroundColor: '#d32f2f' },
   bloodGroupOptionText: { fontSize: 14, color: '#333' },
@@ -425,5 +507,11 @@ const styles = StyleSheet.create({
   urgencyOption: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
   urgencyOptionText: { color: '#fff', fontWeight: 'bold' },
   submitButton: { backgroundColor: '#d32f2f', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 20, marginBottom: 20 },
-  submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
+  submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  donorDetailCard: { backgroundColor: '#f9f9f9', padding: 15, borderRadius: 10, marginBottom: 10 },
+  donorDetailName: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 5 },
+  donorDetailBlood: { fontSize: 14, color: '#d32f2f', marginBottom: 3 },
+  donorDetailPhone: { fontSize: 13, color: '#666', marginBottom: 3 },
+  donorDetailEmail: { fontSize: 13, color: '#666', marginBottom: 3 },
+  donorDetailTime: { fontSize: 11, color: '#999', marginTop: 5 }
 });
