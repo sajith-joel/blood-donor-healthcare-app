@@ -149,11 +149,23 @@ export default function DonorHomeScreen({ navigation }) {
     console.log('Request ID:', request.id);
     console.log('Request Blood Group:', request.bloodGroup);
     console.log('Hospital:', request.hospitalName);
-    console.log('User ID:', user?.uid);
-    console.log('User Data:', userData);
+    
+    // Get complete donor details
+    const donorDetails = {
+      donorId: user.uid,
+      donorName: userData?.name || 'Anonymous Donor',
+      bloodGroup: userData?.bloodGroup,
+      phone: userData?.phone || 'Not provided',
+      email: user?.email || 'Not provided',
+      respondedAt: Timestamp.now(),
+      status: 'pending',
+      message: `Donor responded to ${request.bloodGroup} blood request`,
+      additionalInfo: userData?.address || 'No address provided'
+    };
+    
+    console.log('Donor details being sent:', donorDetails);
     
     if (!userData?.phone) {
-      console.log('No phone number found');
       Alert.alert(
         'Phone Number Required',
         'Please update your profile with a phone number so the hospital can contact you.',
@@ -167,50 +179,50 @@ export default function DonorHomeScreen({ navigation }) {
 
     Alert.alert(
       'Confirm Donation',
-      `Do you want to donate ${request.bloodGroup} blood to ${request.hospitalName}?`,
+      `You are about to respond to a blood request:\n\n` +
+      `🏥 Hospital: ${request.hospitalName}\n` +
+      `🩸 Blood Group: ${request.bloodGroup}\n` +
+      `📍 Distance: ${request.distance ? request.distance.toFixed(1) : 'Unknown'}km\n` +
+      `⚠️ Urgency: ${request.urgency.toUpperCase()}\n\n` +
+      `Your details will be shared with the hospital:\n` +
+      `📝 Name: ${donorDetails.donorName}\n` +
+      `📞 Phone: ${donorDetails.phone}\n` +
+      `📧 Email: ${donorDetails.email}\n\n` +
+      `Do you want to proceed?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Yes, I Can Donate',
+          text: 'Yes, Share My Details',
           onPress: async () => {
-            console.log('User confirmed donation');
             try {
               const requestRef = doc(db, 'bloodRequests', request.id);
-              const response = {
-                donorId: user.uid,
-                donorName: userData?.name || 'Anonymous Donor',
-                bloodGroup: userData?.bloodGroup,
-                phone: userData?.phone,
-                respondedAt: Timestamp.now(),
-                status: 'pending'
-              };
-              
-              console.log('Response object:', response);
-              
               const existingResponses = request.donorResponses || [];
-              console.log('Existing responses count:', existingResponses.length);
               
               const alreadyResponded = existingResponses.some(r => r.donorId === user.uid);
               if (alreadyResponded) {
-                console.log('Already responded');
                 Alert.alert('Already Responded', 'You have already responded to this request.');
                 return;
               }
               
-              console.log('Updating Firestore...');
               await updateDoc(requestRef, {
-                donorResponses: [...existingResponses, response],
-                lastResponseAt: Timestamp.now()
+                donorResponses: [...existingResponses, donorDetails],
+                lastResponseAt: Timestamp.now(),
+                totalResponses: (existingResponses.length + 1)
               });
               
-              console.log('Update successful!');
+              console.log('Donor details saved to Firestore');
+              
               Alert.alert(
-                'Response Sent! 🩸',
-                `Thank you! ${request.hospitalName} will contact you at ${userData.phone}.`
+                '✅ Response Sent!',
+                `Your details have been sent to ${request.hospitalName}.\n\n` +
+                `The hospital will contact you shortly at:\n` +
+                `📞 ${donorDetails.phone}\n` +
+                `📧 ${donorDetails.email}\n\n` +
+                `Thank you for saving a life! 🩸`
               );
             } catch (error) {
               console.error('Error responding:', error);
-              Alert.alert('Error', 'Failed to send response: ' + error.message);
+              Alert.alert('Error', 'Failed to send response. Please try again.');
             }
           }
         }
