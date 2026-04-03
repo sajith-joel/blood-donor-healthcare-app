@@ -9,21 +9,32 @@ import {
   Alert
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
-import { getActiveRequests, createBloodRequest } from '../../services/bloodRequestService';
+import { subscribeToHospitalRequests, updateRequestStatus } from '../../services/bloodRequestService';
 import { getCurrentLocation } from '../../services/locationService';
 import RequestForm from '../../components/hospital/RequestForm';
 import BloodRequestCard from '../../components/donor/BloodRequestCard';
 
 export default function HospitalDashboard({ navigation }) {
   const { user } = useAuth();
-  const [activeRequests, setActiveRequests] = useState([]);
+  const [requests, setRequests] = useState([]);
   const [showRequestForm, setShowRequestForm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [hospitalLocation, setHospitalLocation] = useState(null);
+  let unsubscribeRequests = null;
 
   useEffect(() => {
     loadHospitalLocation();
-    loadActiveRequests();
+    
+    // Subscribe to real-time requests
+    unsubscribeRequests = subscribeToHospitalRequests(user.uid, (newRequests) => {
+      setRequests(newRequests);
+    });
+
+    return () => {
+      if (unsubscribeRequests) {
+        unsubscribeRequests();
+      }
+    };
   }, []);
 
   const loadHospitalLocation = async () => {
@@ -35,30 +46,18 @@ export default function HospitalDashboard({ navigation }) {
     }
   };
 
-  const loadActiveRequests = async () => {
-    try {
-      const requests = await getActiveRequests(hospitalLocation);
-      setActiveRequests(requests);
-    } catch (error) {
-      console.error('Error loading requests:', error);
-    }
-  };
-
   const handleCreateRequest = async (requestData) => {
     try {
       const result = await createBloodRequest({
         ...requestData,
         hospitalId: user.uid,
+        hospitalName: user.displayName || 'Hospital',
         hospitalLocation
       });
       
       if (result.success) {
-        Alert.alert(
-          'Success',
-          `Blood request created! Notified ${result.nearbyDonorsCount} nearby donors.`
-        );
+        Alert.alert('Success', 'Blood request created successfully!');
         setShowRequestForm(false);
-        loadActiveRequests();
       } else {
         Alert.alert('Error', result.error);
       }
@@ -67,15 +66,35 @@ export default function HospitalDashboard({ navigation }) {
     }
   };
 
+  const handleUpdateStatus = async (requestId, status, donorId = null) => {
+    Alert.alert(
+      'Update Request',
+      `Mark this request as ${status}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: async () => {
+            const result = await updateRequestStatus(requestId, status, donorId);
+            if (result.success) {
+              Alert.alert('Success', `Request marked as ${status}`);
+            } else {
+              Alert.alert('Error', result.error);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadActiveRequests();
+    await loadHospitalLocation();
     setRefreshing(false);
   };
 
-  const getRadiusText = (isRare) => {
-    return isRare ? '5 km radius' : '3 km radius';
-  };
+  const activeRequests = requests.filter(r => r.status === 'active');
+  const fulfilledRequests = requests.filter(r => r.status === 'fulfilled');
 
   return (
     <View style={styles.container}>
@@ -100,8 +119,13 @@ export default function HospitalDashboard({ navigation }) {
           </Text>
           <Text style={styles.statLabel}>Rare Blood Requests</Text>
         </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statNumber}>{fulfilledRequests.length}</Text>
+          <Text style={styles.statLabel}>Fulfilled</Text>
+        </View>
       </View>
 
+      <Text style={styles.sectionTitle}>Active Requests</Text>
       <FlatList
         data={activeRequests}
         keyExtractor={(item) => item.id}
@@ -109,7 +133,7 @@ export default function HospitalDashboard({ navigation }) {
           <BloodRequestCard
             request={item}
             onPress={() => navigation.navigate('RequestStatus', { requestId: item.id })}
-            footerText={`Searching within ${getRadiusText(item.isRare)}`}
+            footerText={`${item.donorResponses?.length || 0} donor(s) responded`}
           />
         )}
         refreshControl={
@@ -117,7 +141,10 @@ export default function HospitalDashboard({ navigation }) {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No active blood requests</Text>
+            <Text style={styles.emptyText}>No active requests</Text>
+            <Text style={styles.emptySubtext}>
+              Tap "New Request" to create one
+            </Text>
           </View>
         }
       />
@@ -171,7 +198,7 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 10,
     alignItems: 'center',
-    minWidth: 120,
+    minWidth: 100,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -184,9 +211,17 @@ const styles = StyleSheet.create({
     color: '#d32f2f',
   },
   statLabel: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#666',
     marginTop: 5,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 5,
   },
   emptyContainer: {
     flex: 1,
@@ -197,5 +232,10 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 16,
     color: '#999',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 5,
   },
 });

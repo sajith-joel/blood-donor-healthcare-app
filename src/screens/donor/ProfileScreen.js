@@ -77,13 +77,18 @@ export default function ProfileScreen() {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            await logout();
+            const result = await logout();
+            if (result.success) {
+              // Navigation will be handled by AuthContext
+              Alert.alert('Success', 'Logged out successfully');
+            } else {
+              Alert.alert('Error', 'Failed to logout');
+            }
           }
         }
       ]
     );
   };
-
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,

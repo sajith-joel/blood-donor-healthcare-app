@@ -5,10 +5,11 @@ import {
   StyleSheet,
   FlatList,
   RefreshControl,
-  TouchableOpacity
+  TouchableOpacity,
+  Alert
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
-import { getActiveRequests } from '../../services/bloodRequestService';
+import { subscribeToActiveRequests, respondToRequest } from '../../services/bloodRequestService';
 import { getCurrentLocation } from '../../services/locationService';
 import { registerForPushNotifications } from '../../services/notificationService';
 import BloodRequestCard from '../../components/donor/BloodRequestCard';
@@ -19,21 +20,44 @@ export default function DonorHomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [userBloodGroup, setUserBloodGroup] = useState('');
+  const [loading, setLoading] = useState(true);
+  let unsubscribeRequests = null;
 
   useEffect(() => {
     loadUserData();
     setupNotifications();
+
+    return () => {
+      if (unsubscribeRequests) {
+        unsubscribeRequests();
+      }
+    };
   }, []);
 
   const loadUserData = async () => {
     try {
       const location = await getCurrentLocation();
       setUserLocation(location);
-      // Get user blood group from database
-      // setUserBloodGroup(userData.bloodGroup);
-      loadNearbyRequests(location);
+      
+      // Get user blood group from database (you'll need to fetch this)
+      // For now, let's assume it's set
+      
+      // Subscribe to real-time requests
+      if (unsubscribeRequests) {
+        unsubscribeRequests();
+      }
+      
+      unsubscribeRequests = subscribeToActiveRequests(
+        location, 
+        userBloodGroup || null, 
+        (newRequests) => {
+          setRequests(newRequests);
+          setLoading(false);
+        }
+      );
     } catch (error) {
       console.error('Error loading user data:', error);
+      setLoading(false);
     }
   };
 
@@ -41,25 +65,48 @@ export default function DonorHomeScreen({ navigation }) {
     await registerForPushNotifications(user.uid);
   };
 
-  const loadNearbyRequests = async (location) => {
-    try {
-      const nearbyRequests = await getActiveRequests(location, userBloodGroup);
-      setRequests(nearbyRequests);
-    } catch (error) {
-      console.error('Error loading requests:', error);
-    }
+  const handleRespond = async (request) => {
+    Alert.alert(
+      'Confirm Donation',
+      `Do you want to donate ${request.bloodGroup} blood to ${request.hospitalName}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, I Can Donate',
+          onPress: async () => {
+            const result = await respondToRequest(
+              request.id, 
+              user.uid, 
+              user.displayName || 'Anonymous', 
+              userBloodGroup
+            );
+            
+            if (result.success) {
+              Alert.alert('Success', 'Thank you! The hospital will contact you.');
+            } else {
+              Alert.alert('Error', result.error || 'Failed to respond');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
     const location = await getCurrentLocation();
-    await loadNearbyRequests(location);
+    setUserLocation(location);
+    // The subscription will handle the refresh
     setRefreshing(false);
   };
 
-  const handleRespond = (request) => {
-    navigation.navigate('RespondToRequest', { request });
-  };
+  if (loading && requests.length === 0) {
+    return (
+      <View style={styles.centerContainer}>
+        <Text>Loading blood requests...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -133,5 +180,10 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 10,
     textAlign: 'center',
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

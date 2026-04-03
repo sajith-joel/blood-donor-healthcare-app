@@ -10,15 +10,14 @@ import {
   orderBy,
   Timestamp,
   getDoc,
-  deleteDoc
+  onSnapshot,
+  setDoc
 } from 'firebase/firestore';
-import { sendBulkNotifications } from './notificationService';
 
-const RARE_BLOOD_GROUPS = ['AB-', 'B-', 'A-', 'O-'];
-
+// Create blood request
 export const createBloodRequest = async (requestData) => {
   try {
-    const isRare = RARE_BLOOD_GROUPS.includes(requestData.bloodGroup);
+    const isRare = ['AB-', 'B-', 'A-', 'O-'].includes(requestData.bloodGroup);
     const radius = isRare ? 5 : 3;
     
     const request = {
@@ -35,34 +34,17 @@ export const createBloodRequest = async (requestData) => {
     
     // Update hospital statistics
     const hospitalRef = doc(db, 'hospitals', requestData.hospitalId);
-    await updateDoc(hospitalRef, {
-      totalRequests: (await getDoc(hospitalRef)).data()?.totalRequests + 1 || 1,
-      activeRequests: (await getDoc(hospitalRef)).data()?.activeRequests + 1 || 1
-    });
-    
-    // Get nearby donors
-    const nearbyDonors = await getNearbyDonors(
-      requestData.hospitalLocation,
-      requestData.bloodGroup,
-      radius
-    );
-    
-    // Send notifications to nearby donors
-    let notificationResults = [];
-    if (nearbyDonors.length > 0) {
-      notificationResults = await sendBulkNotifications(nearbyDonors, {
-        requestId: docRef.id,
-        bloodGroup: requestData.bloodGroup,
-        hospitalName: requestData.hospitalName,
-        urgency: requestData.urgency
+    const hospitalDoc = await getDoc(hospitalRef);
+    if (hospitalDoc.exists()) {
+      await updateDoc(hospitalRef, {
+        totalRequests: (hospitalDoc.data().totalRequests || 0) + 1,
+        activeRequests: (hospitalDoc.data().activeRequests || 0) + 1
       });
     }
     
     return { 
       success: true, 
-      requestId: docRef.id, 
-      nearbyDonorsCount: nearbyDonors.length,
-      notificationsSent: notificationResults.filter(r => r.success).length
+      requestId: docRef.id
     };
   } catch (error) {
     console.error('Error creating blood request:', error);
@@ -70,57 +52,17 @@ export const createBloodRequest = async (requestData) => {
   }
 };
 
-export const getNearbyDonors = async (hospitalLocation, bloodGroup, radiusKm) => {
-  try {
-    const donorsRef = collection(db, 'donors');
-    const q = query(donorsRef, where('bloodGroup', '==', bloodGroup), where('isAvailable', '==', true));
-    const querySnapshot = await getDocs(q);
-    
-    const nearbyDonors = [];
-    for (const doc of querySnapshot.docs) {
-      const donor = doc.data();
-      const userDoc = await getDoc(doc(db, 'users', donor.uid));
-      const userData = userDoc.data();
-      
-      if (donor.currentLocation && donor.locationEnabled) {
-        const distance = calculateDistance(
-          hospitalLocation.latitude,
-          hospitalLocation.longitude,
-          donor.currentLocation.latitude,
-          donor.currentLocation.longitude
-        );
-        
-        if (distance <= radiusKm) {
-          nearbyDonors.push({ 
-            id: doc.id, 
-            ...donor, 
-            ...userData,
-            distance 
-          });
-        }
-      }
-    }
-    
-    return nearbyDonors.sort((a, b) => a.distance - b.distance);
-  } catch (error) {
-    console.error('Error getting nearby donors:', error);
-    return [];
-  }
-};
-
-export const getActiveRequests = async (userLocation, bloodGroup = null, radius = null) => {
-  try {
-    const requestsRef = collection(db, 'bloodRequests');
-    const q = query(
-      requestsRef, 
-      where('status', '==', 'active'),
-      orderBy('createdAt', 'desc')
-    );
-    
-    const querySnapshot = await getDocs(q);
+// Get active requests with real-time listener
+export const subscribeToActiveRequests = (userLocation, bloodGroup, callback) => {
+  const q = query(
+    collection(db, 'bloodRequests'),
+    where('status', '==', 'active'),
+    orderBy('createdAt', 'desc')
+  );
+  
+  return onSnapshot(q, (snapshot) => {
     const requests = [];
-    
-    for (const doc of querySnapshot.docs) {
+    snapshot.forEach((doc) => {
       const request = doc.data();
       let shouldInclude = true;
       
@@ -132,27 +74,25 @@ export const getActiveRequests = async (userLocation, bloodGroup = null, radius 
         const distance = calculateDistance(
           userLocation.latitude,
           userLocation.longitude,
-          request.hospitalLocation.latitude,
-          request.hospitalLocation.longitude
+          request.hospitalLocation?.latitude || 0,
+          request.hospitalLocation?.longitude || 0
         );
         
-        const maxRadius = radius || request.radius;
+        const maxRadius = request.radius || 3;
         if (distance <= maxRadius) {
           requests.push({ id: doc.id, ...request, distance });
         }
       } else if (shouldInclude) {
         requests.push({ id: doc.id, ...request });
       }
-    }
+    });
     
-    return requests.sort((a, b) => (a.distance || 0) - (b.distance || 0));
-  } catch (error) {
-    console.error('Error getting active requests:', error);
-    return [];
-  }
+    callback(requests.sort((a, b) => (a.distance || 0) - (b.distance || 0)));
+  });
 };
 
-export const respondToRequest = async (requestId, donorId, responseData) => {
+// Respond to blood request
+export const respondToRequest = async (requestId, donorId, donorName, bloodGroup) => {
   try {
     const requestRef = doc(db, 'bloodRequests', requestId);
     const requestDoc = await getDoc(requestRef);
@@ -161,15 +101,24 @@ export const respondToRequest = async (requestId, donorId, responseData) => {
       return { success: false, error: 'Request not found' };
     }
     
+    const request = requestDoc.data();
+    
+    // Check if donor already responded
+    const alreadyResponded = request.donorResponses?.some(r => r.donorId === donorId);
+    if (alreadyResponded) {
+      return { success: false, error: 'You have already responded to this request' };
+    }
+    
     const response = {
       donorId,
-      response: responseData.message || 'I can donate',
-      timestamp: Timestamp.now(),
+      donorName,
+      bloodGroup,
+      respondedAt: Timestamp.now(),
       status: 'pending'
     };
     
     await updateDoc(requestRef, {
-      donorResponses: arrayUnion(response)
+      donorResponses: [...(request.donorResponses || []), response]
     });
     
     return { success: true };
@@ -179,10 +128,14 @@ export const respondToRequest = async (requestId, donorId, responseData) => {
   }
 };
 
+// Update request status
 export const updateRequestStatus = async (requestId, status, donorId = null) => {
   try {
     const requestRef = doc(db, 'bloodRequests', requestId);
-    const updates = { status, updatedAt: Timestamp.now() };
+    const updates = { 
+      status, 
+      updatedAt: Timestamp.now() 
+    };
     
     if (status === 'fulfilled' && donorId) {
       updates.fulfilledBy = donorId;
@@ -200,18 +153,13 @@ export const updateRequestStatus = async (requestId, status, donorId = null) => 
       
       // Update user statistics
       const userRef = doc(db, 'users', donorId);
-      await updateDoc(userRef, {
-        totalDonations: (await getDoc(userRef)).data()?.totalDonations + 1 || 1,
-        lastDonation: Timestamp.now()
-      });
-    }
-    
-    if (status === 'fulfilled' || status === 'cancelled') {
-      const request = await getDoc(requestRef);
-      const hospitalRef = doc(db, 'hospitals', request.data().hospitalId);
-      await updateDoc(hospitalRef, {
-        activeRequests: (await getDoc(hospitalRef)).data()?.activeRequests - 1 || 0
-      });
+      const userDoc = await getDoc(userRef);
+      if (userDoc.exists()) {
+        await updateDoc(userRef, {
+          totalDonations: (userDoc.data().totalDonations || 0) + 1,
+          lastDonation: Timestamp.now()
+        });
+      }
     }
     
     await updateDoc(requestRef, updates);
@@ -222,85 +170,25 @@ export const updateRequestStatus = async (requestId, status, donorId = null) => 
   }
 };
 
-export const getHospitalRequests = async (hospitalId, status = null) => {
-  try {
-    let q;
-    if (status) {
-      q = query(
-        collection(db, 'bloodRequests'),
-        where('hospitalId', '==', hospitalId),
-        where('status', '==', status),
-        orderBy('createdAt', 'desc')
-      );
-    } else {
-      q = query(
-        collection(db, 'bloodRequests'),
-        where('hospitalId', '==', hospitalId),
-        orderBy('createdAt', 'desc')
-      );
-    }
-    
-    const querySnapshot = await getDocs(q);
+// Subscribe to hospital requests
+export const subscribeToHospitalRequests = (hospitalId, callback) => {
+  const q = query(
+    collection(db, 'bloodRequests'),
+    where('hospitalId', '==', hospitalId),
+    orderBy('createdAt', 'desc')
+  );
+  
+  return onSnapshot(q, (snapshot) => {
     const requests = [];
-    querySnapshot.forEach((doc) => {
+    snapshot.forEach((doc) => {
       requests.push({ id: doc.id, ...doc.data() });
     });
-    
-    return requests;
-  } catch (error) {
-    console.error('Error getting hospital requests:', error);
-    return [];
-  }
+    callback(requests);
+  });
 };
 
-export const getDonorHistory = async (donorId) => {
-  try {
-    const q = query(
-      collection(db, 'bloodRequests'),
-      where('fulfilledBy', '==', donorId),
-      orderBy('fulfilledAt', 'desc')
-    );
-    
-    const querySnapshot = await getDocs(q);
-    const donations = [];
-    querySnapshot.forEach((doc) => {
-      donations.push({ id: doc.id, ...doc.data() });
-    });
-    
-    return donations;
-  } catch (error) {
-    console.error('Error getting donor history:', error);
-    return [];
-  }
-};
-
-export const deleteExpiredRequests = async () => {
-  try {
-    const twentyFourHoursAgo = new Date();
-    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
-    
-    const q = query(
-      collection(db, 'bloodRequests'),
-      where('createdAt', '<', Timestamp.fromDate(twentyFourHoursAgo)),
-      where('status', '==', 'active')
-    );
-    
-    const querySnapshot = await getDocs(q);
-    const batch = db.batch();
-    
-    querySnapshot.forEach((doc) => {
-      batch.update(doc.ref, { status: 'expired' });
-    });
-    
-    await batch.commit();
-    return { success: true, count: querySnapshot.size };
-  } catch (error) {
-    console.error('Error deleting expired requests:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-const calculateDistance = (lat1, lon1, lat2, lon2) => {
+// Calculate distance
+function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -310,4 +198,4 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
     Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return R * c;
-};
+}
