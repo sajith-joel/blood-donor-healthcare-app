@@ -19,7 +19,8 @@ import {
   onSnapshot,
   Timestamp,
   doc,
-  updateDoc
+  updateDoc,
+  getDoc
 } from 'firebase/firestore';
 import { getCurrentLocation } from '../../services/locationService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -50,19 +51,19 @@ export default function DonorHomeScreen({ navigation }) {
 
   const loadUserData = async () => {
     try {
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('uid', '==', user.uid));
+      // Get user data from users collection
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+      if (userDoc.exists()) {
+        setUserData(userDoc.data());
+        console.log('User data loaded:', userDoc.data());
+      } else {
+        console.log('No user document found');
+      }
       
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        snapshot.forEach((doc) => {
-          setUserData(doc.data());
-        });
-      });
-      
+      // Get current location
       const location = await getCurrentLocation();
       setUserLocation(location);
-      
-      return unsubscribe;
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -90,6 +91,7 @@ export default function DonorHomeScreen({ navigation }) {
         const request = docSnapshot.data();
         const requestId = docSnapshot.id;
         
+        // Check if blood group is compatible
         let isCompatible = false;
         if (userData?.bloodGroup) {
           isCompatible = checkCompatibility(userData.bloodGroup, request.bloodGroup);
@@ -99,6 +101,7 @@ export default function DonorHomeScreen({ navigation }) {
         
         if (!isCompatible) continue;
         
+        // Calculate distance if location available
         let distance = null;
         let isWithinRadius = true;
         
@@ -147,23 +150,7 @@ export default function DonorHomeScreen({ navigation }) {
   const respondToRequest = async (request) => {
     console.log('=== RESPOND BUTTON CLICKED ===');
     console.log('Request ID:', request.id);
-    console.log('Request Blood Group:', request.bloodGroup);
-    console.log('Hospital:', request.hospitalName);
-    
-    // Get complete donor details
-    const donorDetails = {
-      donorId: user.uid,
-      donorName: userData?.name || 'Anonymous Donor',
-      bloodGroup: userData?.bloodGroup,
-      phone: userData?.phone || 'Not provided',
-      email: user?.email || 'Not provided',
-      respondedAt: Timestamp.now(),
-      status: 'pending',
-      message: `Donor responded to ${request.bloodGroup} blood request`,
-      additionalInfo: userData?.address || 'No address provided'
-    };
-    
-    console.log('Donor details being sent:', donorDetails);
+    console.log('User Data:', userData);
     
     if (!userData?.phone) {
       Alert.alert(
@@ -177,6 +164,20 @@ export default function DonorHomeScreen({ navigation }) {
       return;
     }
 
+    // Create donor details object with all necessary fields
+    const donorDetails = {
+      donorId: user.uid,
+      donorName: userData?.name || 'Anonymous Donor',
+      bloodGroup: userData?.bloodGroup || 'Unknown',
+      phone: userData?.phone || 'Not provided',
+      email: user?.email || 'Not provided',
+      respondedAt: Timestamp.now(),
+      status: 'pending',
+      message: `Donor responded to ${request.bloodGroup} blood request`
+    };
+    
+    console.log('Donor details being sent to Firestore:', donorDetails);
+    
     Alert.alert(
       'Confirm Donation',
       `You are about to respond to a blood request:\n\n` +
@@ -198,19 +199,21 @@ export default function DonorHomeScreen({ navigation }) {
               const requestRef = doc(db, 'bloodRequests', request.id);
               const existingResponses = request.donorResponses || [];
               
+              // Check if already responded
               const alreadyResponded = existingResponses.some(r => r.donorId === user.uid);
               if (alreadyResponded) {
                 Alert.alert('Already Responded', 'You have already responded to this request.');
                 return;
               }
               
+              // Update the request with donor details
               await updateDoc(requestRef, {
                 donorResponses: [...existingResponses, donorDetails],
                 lastResponseAt: Timestamp.now(),
                 totalResponses: (existingResponses.length + 1)
               });
               
-              console.log('Donor details saved to Firestore');
+              console.log('Donor details successfully saved to Firestore!');
               
               Alert.alert(
                 '✅ Response Sent!',
@@ -222,7 +225,7 @@ export default function DonorHomeScreen({ navigation }) {
               );
             } catch (error) {
               console.error('Error responding:', error);
-              Alert.alert('Error', 'Failed to send response. Please try again.');
+              Alert.alert('Error', 'Failed to send response: ' + error.message);
             }
           }
         }
