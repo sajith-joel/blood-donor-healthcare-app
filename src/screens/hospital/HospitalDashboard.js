@@ -24,7 +24,8 @@ import {
   orderBy,
   Timestamp,
   onSnapshot,
-  getDocs
+  getDocs,
+  setDoc
 } from 'firebase/firestore';
 import { getCurrentLocation } from '../../services/locationService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -55,16 +56,34 @@ export default function HospitalDashboard({ navigation }) {
 
   useEffect(() => {
     if (user?.uid) {
-      console.log('Hospital user ID:', user.uid);
+      console.log('=== HOSPITAL DASHBOARD INITIALIZED ===');
+      console.log('User ID:', user.uid);
+      console.log('User Email:', user.email);
+      console.log('User Display Name:', user.displayName);
       loadHospitalLocation();
+      checkFirestoreConnection();
       subscribeToRequests();
     } else {
-      console.log('No user found');
+      console.log('No user found - please login as hospital');
+      setLoading(false);
     }
   }, [user?.uid]);
 
+  const checkFirestoreConnection = async () => {
+    try {
+      console.log('Checking Firestore connection...');
+      const testRef = collection(db, 'bloodRequests');
+      const testQuery = await getDocs(testRef);
+      console.log('Firestore connection successful! Total requests in DB:', testQuery.size);
+    } catch (error) {
+      console.error('Firestore connection error:', error);
+      Alert.alert('Database Error', 'Cannot connect to Firebase. Please check your internet connection.');
+    }
+  };
+
   const loadHospitalLocation = async () => {
     try {
+      console.log('Loading hospital location...');
       const location = await getCurrentLocation();
       console.log('Hospital location loaded:', location);
       setHospitalLocation(location);
@@ -80,7 +99,7 @@ export default function HospitalDashboard({ navigation }) {
       return;
     }
     
-    console.log('Setting up real-time listener for hospital:', user.uid);
+    console.log('Setting up real-time listener for hospital ID:', user.uid);
     
     const q = query(
       collection(db, 'bloodRequests'),
@@ -90,11 +109,12 @@ export default function HospitalDashboard({ navigation }) {
 
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
-        console.log('Received update, total requests:', snapshot.size);
+        console.log('=== REAL-TIME UPDATE RECEIVED ===');
+        console.log('Total requests in snapshot:', snapshot.size);
         const requestsList = [];
         snapshot.forEach((doc) => {
           const data = doc.data();
-          console.log('Request:', doc.id, data.bloodGroup, data.status);
+          console.log(`Request ID: ${doc.id}, Blood: ${data.bloodGroup}, Status: ${data.status}, Quantity: ${data.quantity}`);
           requestsList.push({ id: doc.id, ...data });
         });
         setRequests(requestsList);
@@ -102,6 +122,7 @@ export default function HospitalDashboard({ navigation }) {
       },
       (error) => {
         console.error('Error in snapshot listener:', error);
+        Alert.alert('Firestore Error', error.message);
         setLoading(false);
       }
     );
@@ -110,9 +131,10 @@ export default function HospitalDashboard({ navigation }) {
   };
 
   const createBloodRequest = async () => {
-    console.log('Create button pressed');
-    console.log('Form data:', formData);
+    console.log('=== CREATE BLOOD REQUEST ===');
+    console.log('Form data:', JSON.stringify(formData, null, 2));
     
+    // Validate form
     if (!formData.bloodGroup) {
       Alert.alert('Error', 'Please select blood group');
       return;
@@ -120,6 +142,11 @@ export default function HospitalDashboard({ navigation }) {
 
     if (!hospitalLocation) {
       Alert.alert('Error', 'Unable to get your location. Please enable location services.');
+      return;
+    }
+
+    if (!user?.uid) {
+      Alert.alert('Error', 'User not authenticated. Please login again.');
       return;
     }
 
@@ -132,13 +159,14 @@ export default function HospitalDashboard({ navigation }) {
       const requestData = {
         hospitalId: user.uid,
         hospitalName: user.displayName || 'City Hospital',
+        hospitalEmail: user.email,
         bloodGroup: formData.bloodGroup,
         quantity: parseInt(formData.quantity),
         department: formData.department,
         urgency: formData.urgency,
-        patientName: formData.patientName,
-        patientAge: formData.patientAge,
-        notes: formData.notes,
+        patientName: formData.patientName || '',
+        patientAge: formData.patientAge || '',
+        notes: formData.notes || '',
         status: 'active',
         radius: radius,
         isRare: isRare,
@@ -147,17 +175,29 @@ export default function HospitalDashboard({ navigation }) {
           latitude: hospitalLocation.latitude,
           longitude: hospitalLocation.longitude
         },
-        donorResponses: []
+        donorResponses: [],
+        createdAtDate: new Date().toISOString()
       };
 
-      console.log('Creating request with data:', requestData);
+      console.log('Sending data to Firestore:', JSON.stringify(requestData, null, 2));
+      
       const docRef = await addDoc(collection(db, 'bloodRequests'), requestData);
       
-      console.log('Request created with ID:', docRef.id);
+      console.log('✅ SUCCESS! Request created with ID:', docRef.id);
+      
+      // Verify the request was added
+      const verifyDoc = await getDocs(query(collection(db, 'bloodRequests'), where('hospitalId', '==', user.uid)));
+      console.log('Total requests after creation:', verifyDoc.size);
       
       Alert.alert(
-        'Success', 
-        `Blood request created!\n\nBlood Group: ${formData.bloodGroup}\nQuantity: ${formData.quantity} units\nSearch Radius: ${radius}km\n\nDonors will be notified.`
+        '✅ Success!', 
+        `Blood request created successfully!\n\n` +
+        `Blood Group: ${formData.bloodGroup}\n` +
+        `Quantity: ${formData.quantity} units\n` +
+        `Department: ${formData.department}\n` +
+        `Urgency: ${formData.urgency.toUpperCase()}\n` +
+        `Search Radius: ${radius}km\n\n` +
+        `Donors will be notified immediately.`
       );
       
       setShowRequestForm(false);
@@ -171,7 +211,7 @@ export default function HospitalDashboard({ navigation }) {
         notes: ''
       });
     } catch (error) {
-      console.error('Error creating request:', error);
+      console.error('❌ Error creating request:', error);
       Alert.alert('Error', 'Failed to create blood request: ' + error.message);
     } finally {
       setLoading(false);
@@ -179,13 +219,15 @@ export default function HospitalDashboard({ navigation }) {
   };
 
   const updateRequestStatus = async (requestId, newStatus) => {
-    console.log('Updating request:', requestId, 'to', newStatus);
+    console.log(`Updating request ${requestId} to status: ${newStatus}`);
     try {
       const requestRef = doc(db, 'bloodRequests', requestId);
       await updateDoc(requestRef, {
         status: newStatus,
-        updatedAt: Timestamp.now()
+        updatedAt: Timestamp.now(),
+        updatedAtDate: new Date().toISOString()
       });
+      console.log(`✅ Request ${requestId} updated to ${newStatus}`);
       Alert.alert('Success', `Request marked as ${newStatus}`);
     } catch (error) {
       console.error('Error updating request:', error);
@@ -231,14 +273,14 @@ export default function HospitalDashboard({ navigation }) {
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>🏥 Hospital Dashboard</Text>
-          <Text style={styles.subtitle}>Welcome, {user?.displayName || 'Hospital'}</Text>
+          <Text style={styles.subtitle}>Welcome, {user?.displayName || user?.email || 'Hospital'}</Text>
         </View>
         <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
           <Icon name="logout" size={24} color="#d32f2f" />
         </TouchableOpacity>
       </View>
 
-      {/* Stats - Make New Request card clickable */}
+      {/* Stats */}
       <View style={styles.statsContainer}>
         <TouchableOpacity style={styles.statCard} onPress={() => setShowRequestForm(true)}>
           <Icon name="add-circle" size={40} color="#d32f2f" />
@@ -254,46 +296,62 @@ export default function HospitalDashboard({ navigation }) {
         </View>
       </View>
 
-      <Text style={styles.sectionTitle}>Active Requests</Text>
+      <Text style={styles.sectionTitle}>Active Requests ({activeRequests.length})</Text>
       <FlatList
         data={activeRequests}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View style={styles.requestCard}>
-            <View style={styles.bloodGroupCircle}>
-              <Text style={styles.bloodGroupText}>{item.bloodGroup}</Text>
+            <View style={styles.requestHeader}>
+              <View style={styles.bloodGroupCircle}>
+                <Text style={styles.bloodGroupText}>{item.bloodGroup}</Text>
+              </View>
+              <View style={styles.urgencyBadgeContainer}>
+                <View style={[styles.urgencyBadge, { backgroundColor: urgencyLevels.find(u => u.value === item.urgency)?.color || '#4caf50' }]}>
+                  <Text style={styles.urgencyText}>{item.urgency.toUpperCase()}</Text>
+                </View>
+                {item.isRare && (
+                  <View style={styles.rareBadge}>
+                    <Text style={styles.rareText}>⭐ RARE</Text>
+                  </View>
+                )}
+              </View>
             </View>
+            
             <View style={styles.requestInfo}>
               <Text style={styles.departmentText}>{item.department || 'Blood Bank'}</Text>
-              <Text style={styles.quantityText}>Need {item.quantity} unit(s)</Text>
-              <Text style={styles.urgencyText}>Urgency: {item.urgency}</Text>
-              <Text style={styles.radiusText}>Search radius: {item.radius}km</Text>
+              <Text style={styles.quantityText}>📊 Need {item.quantity} unit(s)</Text>
+              <Text style={styles.radiusText}>📍 Search radius: {item.radius}km</Text>
               <Text style={styles.responseCount}>
-                {item.donorResponses?.length || 0} donor(s) responded
+                👥 {item.donorResponses?.length || 0} donor(s) responded
               </Text>
               {item.donorResponses && item.donorResponses.length > 0 && (
                 <View style={styles.responseList}>
                   <Text style={styles.responseListTitle}>Recent responses:</Text>
                   {item.donorResponses.slice(0, 2).map((response, idx) => (
                     <Text key={idx} style={styles.responseItem}>
-                      🩸 {response.donorName} - {response.bloodGroup}
+                      🩸 {response.donorName} - {response.bloodGroup} 📞 {response.phone}
                     </Text>
                   ))}
                 </View>
               )}
+              {item.patientName ? (
+                <Text style={styles.patientText}>👤 Patient: {item.patientName}</Text>
+              ) : null}
             </View>
+            
             <View style={styles.buttonGroup}>
               <TouchableOpacity 
                 style={styles.fulfillButton}
                 onPress={() => updateRequestStatus(item.id, 'fulfilled')}
               >
-                <Text style={styles.buttonText}>✓</Text>
+                <Text style={styles.buttonText}>✓ Mark Fulfilled</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 style={styles.cancelButton}
                 onPress={() => updateRequestStatus(item.id, 'cancelled')}
               >
-                <Text style={styles.buttonText}>✗</Text>
+                <Text style={styles.buttonText}>✗ Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -313,6 +371,16 @@ export default function HospitalDashboard({ navigation }) {
             <Icon name="inbox" size={64} color="#ccc" />
             <Text style={styles.emptyText}>No active requests</Text>
             <Text style={styles.emptySubtext}>Tap "New Request" to create one</Text>
+            <TouchableOpacity 
+              style={styles.refreshButton}
+              onPress={() => {
+                console.log('Manual refresh triggered');
+                subscribeToRequests();
+                Alert.alert('Refreshed', 'Checking for existing requests...');
+              }}
+            >
+              <Text style={styles.refreshButtonText}>Refresh</Text>
+            </TouchableOpacity>
           </View>
         }
       />
@@ -344,7 +412,7 @@ export default function HospitalDashboard({ navigation }) {
                 ))}
               </View>
 
-              <Text style={styles.inputLabel}>Quantity (units)</Text>
+              <Text style={styles.inputLabel}>Quantity (units) *</Text>
               <TextInput
                 style={styles.input}
                 value={formData.quantity}
@@ -358,10 +426,10 @@ export default function HospitalDashboard({ navigation }) {
                 style={styles.input}
                 value={formData.department}
                 onChangeText={(text) => setFormData({...formData, department: text})}
-                placeholder="e.g., Emergency, ICU"
+                placeholder="e.g., Emergency, ICU, Surgery"
               />
 
-              <Text style={styles.inputLabel}>Urgency Level</Text>
+              <Text style={styles.inputLabel}>Urgency Level *</Text>
               <View style={styles.urgencyContainer}>
                 {urgencyLevels.map(level => (
                   <TouchableOpacity
@@ -401,8 +469,16 @@ export default function HospitalDashboard({ navigation }) {
                 numberOfLines={3}
               />
 
-              <TouchableOpacity style={styles.submitButton} onPress={createBloodRequest}>
-                <Text style={styles.submitButtonText}>Create Request</Text>
+              <TouchableOpacity 
+                style={styles.submitButton} 
+                onPress={createBloodRequest}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Create Request</Text>
+                )}
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -426,25 +502,33 @@ const styles = StyleSheet.create({
   statNumber: { fontSize: 28, fontWeight: 'bold', color: '#d32f2f' },
   statLabel: { fontSize: 12, color: '#666', marginTop: 5 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 15, marginTop: 10, marginBottom: 5 },
-  requestCard: { flexDirection: 'row', backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, alignItems: 'flex-start', elevation: 2 },
-  bloodGroupCircle: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  requestCard: { backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, elevation: 2 },
+  requestHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  bloodGroupCircle: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center' },
   bloodGroupText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  requestInfo: { flex: 1 },
-  departmentText: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  quantityText: { fontSize: 12, color: '#666', marginTop: 2 },
-  urgencyText: { fontSize: 12, color: '#ff9800', marginTop: 2 },
-  radiusText: { fontSize: 11, color: '#4caf50', marginTop: 2 },
-  responseCount: { fontSize: 11, color: '#2196f3', marginTop: 4, fontWeight: '500' },
+  urgencyBadgeContainer: { flexDirection: 'row', gap: 8 },
+  urgencyBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  urgencyText: { color: '#fff', fontWeight: 'bold', fontSize: 10 },
+  rareBadge: { backgroundColor: '#ff9800', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  rareText: { color: '#fff', fontWeight: 'bold', fontSize: 10 },
+  requestInfo: { marginBottom: 12 },
+  departmentText: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 4 },
+  quantityText: { fontSize: 14, color: '#666', marginBottom: 2 },
+  radiusText: { fontSize: 12, color: '#4caf50', marginBottom: 2 },
+  responseCount: { fontSize: 12, color: '#2196f3', marginBottom: 4, fontWeight: '500' },
   responseList: { marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
-  responseListTitle: { fontSize: 10, fontWeight: 'bold', color: '#666', marginBottom: 4 },
-  responseItem: { fontSize: 10, color: '#666', marginBottom: 2 },
-  buttonGroup: { flexDirection: 'row', gap: 8 },
-  fulfillButton: { backgroundColor: '#4caf50', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  cancelButton: { backgroundColor: '#d32f2f', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  responseListTitle: { fontSize: 11, fontWeight: 'bold', color: '#666', marginBottom: 4 },
+  responseItem: { fontSize: 11, color: '#666', marginBottom: 2 },
+  patientText: { fontSize: 12, color: '#999', marginTop: 4, fontStyle: 'italic' },
+  buttonGroup: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  fulfillButton: { flex: 1, backgroundColor: '#4caf50', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
+  cancelButton: { flex: 1, backgroundColor: '#d32f2f', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
+  buttonText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
   emptyContainer: { alignItems: 'center', padding: 50 },
   emptyText: { fontSize: 16, color: '#999', marginTop: 10 },
   emptySubtext: { fontSize: 14, color: '#999', marginTop: 5 },
+  refreshButton: { marginTop: 20, backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25 },
+  refreshButtonText: { color: '#fff', fontWeight: 'bold' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' },
   modalContainer: { backgroundColor: '#fff', margin: 20, borderRadius: 20, padding: 20, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
