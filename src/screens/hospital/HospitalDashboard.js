@@ -23,7 +23,8 @@ import {
   doc,
   orderBy,
   Timestamp,
-  onSnapshot
+  onSnapshot,
+  getDocs
 } from 'firebase/firestore';
 import { getCurrentLocation } from '../../services/locationService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -54,22 +55,32 @@ export default function HospitalDashboard({ navigation }) {
 
   useEffect(() => {
     if (user?.uid) {
+      console.log('Hospital user ID:', user.uid);
       loadHospitalLocation();
       subscribeToRequests();
+    } else {
+      console.log('No user found');
     }
   }, [user?.uid]);
 
   const loadHospitalLocation = async () => {
     try {
       const location = await getCurrentLocation();
+      console.log('Hospital location loaded:', location);
       setHospitalLocation(location);
     } catch (error) {
       console.error('Error loading location:', error);
+      Alert.alert('Location Error', 'Please enable location services to create blood requests.');
     }
   };
 
   const subscribeToRequests = () => {
-    if (!user?.uid) return;
+    if (!user?.uid) {
+      console.log('No user ID, cannot subscribe');
+      return;
+    }
+    
+    console.log('Setting up real-time listener for hospital:', user.uid);
     
     const q = query(
       collection(db, 'bloodRequests'),
@@ -77,17 +88,25 @@ export default function HospitalDashboard({ navigation }) {
       orderBy('createdAt', 'desc')
     );
 
-    return onSnapshot(q, (snapshot) => {
-      const requestsList = [];
-      snapshot.forEach((doc) => {
-        requestsList.push({ id: doc.id, ...doc.data() });
-      });
-      setRequests(requestsList);
-      setLoading(false);
-    }, (error) => {
-      console.error('Error:', error);
-      setLoading(false);
-    });
+    const unsubscribe = onSnapshot(q, 
+      (snapshot) => {
+        console.log('Received update, total requests:', snapshot.size);
+        const requestsList = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          console.log('Request:', doc.id, data.bloodGroup, data.status);
+          requestsList.push({ id: doc.id, ...data });
+        });
+        setRequests(requestsList);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Error in snapshot listener:', error);
+        setLoading(false);
+      }
+    );
+    
+    return unsubscribe;
   };
 
   const createBloodRequest = async () => {
@@ -131,10 +150,16 @@ export default function HospitalDashboard({ navigation }) {
         donorResponses: []
       };
 
-      console.log('Creating request:', requestData);
-      await addDoc(collection(db, 'bloodRequests'), requestData);
+      console.log('Creating request with data:', requestData);
+      const docRef = await addDoc(collection(db, 'bloodRequests'), requestData);
       
-      Alert.alert('Success', `Blood request created! Searching within ${radius}km`);
+      console.log('Request created with ID:', docRef.id);
+      
+      Alert.alert(
+        'Success', 
+        `Blood request created!\n\nBlood Group: ${formData.bloodGroup}\nQuantity: ${formData.quantity} units\nSearch Radius: ${radius}km\n\nDonors will be notified.`
+      );
+      
       setShowRequestForm(false);
       setFormData({
         bloodGroup: '',
@@ -146,8 +171,8 @@ export default function HospitalDashboard({ navigation }) {
         notes: ''
       });
     } catch (error) {
-      console.error('Error:', error);
-      Alert.alert('Error', 'Failed to create request: ' + error.message);
+      console.error('Error creating request:', error);
+      Alert.alert('Error', 'Failed to create blood request: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -163,8 +188,8 @@ export default function HospitalDashboard({ navigation }) {
       });
       Alert.alert('Success', `Request marked as ${newStatus}`);
     } catch (error) {
-      console.error('Error:', error);
-      Alert.alert('Error', 'Failed to update request');
+      console.error('Error updating request:', error);
+      Alert.alert('Error', 'Failed to update request: ' + error.message);
     }
   };
 
@@ -195,6 +220,7 @@ export default function HospitalDashboard({ navigation }) {
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#d32f2f" />
         <Text style={styles.loadingText}>Loading dashboard...</Text>
+        <Text style={styles.loadingSubText}>Make sure you're logged in as a hospital</Text>
       </View>
     );
   }
@@ -238,12 +264,23 @@ export default function HospitalDashboard({ navigation }) {
               <Text style={styles.bloodGroupText}>{item.bloodGroup}</Text>
             </View>
             <View style={styles.requestInfo}>
-              <Text style={styles.departmentText}>{item.department}</Text>
+              <Text style={styles.departmentText}>{item.department || 'Blood Bank'}</Text>
               <Text style={styles.quantityText}>Need {item.quantity} unit(s)</Text>
               <Text style={styles.urgencyText}>Urgency: {item.urgency}</Text>
+              <Text style={styles.radiusText}>Search radius: {item.radius}km</Text>
               <Text style={styles.responseCount}>
                 {item.donorResponses?.length || 0} donor(s) responded
               </Text>
+              {item.donorResponses && item.donorResponses.length > 0 && (
+                <View style={styles.responseList}>
+                  <Text style={styles.responseListTitle}>Recent responses:</Text>
+                  {item.donorResponses.slice(0, 2).map((response, idx) => (
+                    <Text key={idx} style={styles.responseItem}>
+                      🩸 {response.donorName} - {response.bloodGroup}
+                    </Text>
+                  ))}
+                </View>
+              )}
             </View>
             <View style={styles.buttonGroup}>
               <TouchableOpacity 
@@ -261,12 +298,21 @@ export default function HospitalDashboard({ navigation }) {
             </View>
           </View>
         )}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={() => {
+              setRefreshing(true);
+              subscribeToRequests();
+              setTimeout(() => setRefreshing(false), 1000);
+            }} 
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
+            <Icon name="inbox" size={64} color="#ccc" />
             <Text style={styles.emptyText}>No active requests</Text>
-            <TouchableOpacity style={styles.createButtonLarge} onPress={() => setShowRequestForm(true)}>
-              <Text style={styles.createButtonText}>+ Create Request</Text>
-            </TouchableOpacity>
+            <Text style={styles.emptySubtext}>Tap "New Request" to create one</Text>
           </View>
         }
       />
@@ -291,7 +337,9 @@ export default function HospitalDashboard({ navigation }) {
                     style={[styles.bloodGroupOption, formData.bloodGroup === group && styles.bloodGroupSelected]}
                     onPress={() => setFormData({...formData, bloodGroup: group})}
                   >
-                    <Text style={styles.bloodGroupOptionText}>{group}</Text>
+                    <Text style={[styles.bloodGroupOptionText, formData.bloodGroup === group && styles.bloodGroupSelectedText]}>
+                      {group}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -334,6 +382,15 @@ export default function HospitalDashboard({ navigation }) {
                 placeholder="Patient name"
               />
 
+              <Text style={styles.inputLabel}>Patient Age (Optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={formData.patientAge}
+                onChangeText={(text) => setFormData({...formData, patientAge: text})}
+                placeholder="Patient age"
+                keyboardType="numeric"
+              />
+
               <Text style={styles.inputLabel}>Additional Notes</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
@@ -357,8 +414,9 @@ export default function HospitalDashboard({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 10, color: '#666' },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' },
+  loadingText: { marginTop: 10, fontSize: 14, color: '#666' },
+  loadingSubText: { marginTop: 5, fontSize: 12, color: '#999' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
   title: { fontSize: 24, fontWeight: 'bold', color: '#d32f2f' },
   subtitle: { fontSize: 14, color: '#666', marginTop: 4 },
@@ -367,23 +425,26 @@ const styles = StyleSheet.create({
   statCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, alignItems: 'center', minWidth: 100, elevation: 2 },
   statNumber: { fontSize: 28, fontWeight: 'bold', color: '#d32f2f' },
   statLabel: { fontSize: 12, color: '#666', marginTop: 5 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 15, marginTop: 10 },
-  requestCard: { flexDirection: 'row', backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, alignItems: 'center', elevation: 2 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 15, marginTop: 10, marginBottom: 5 },
+  requestCard: { flexDirection: 'row', backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, alignItems: 'flex-start', elevation: 2 },
   bloodGroupCircle: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   bloodGroupText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   requestInfo: { flex: 1 },
   departmentText: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  quantityText: { fontSize: 12, color: '#666' },
+  quantityText: { fontSize: 12, color: '#666', marginTop: 2 },
   urgencyText: { fontSize: 12, color: '#ff9800', marginTop: 2 },
-  responseCount: { fontSize: 11, color: '#4caf50', marginTop: 2 },
+  radiusText: { fontSize: 11, color: '#4caf50', marginTop: 2 },
+  responseCount: { fontSize: 11, color: '#2196f3', marginTop: 4, fontWeight: '500' },
+  responseList: { marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+  responseListTitle: { fontSize: 10, fontWeight: 'bold', color: '#666', marginBottom: 4 },
+  responseItem: { fontSize: 10, color: '#666', marginBottom: 2 },
   buttonGroup: { flexDirection: 'row', gap: 8 },
   fulfillButton: { backgroundColor: '#4caf50', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
   cancelButton: { backgroundColor: '#d32f2f', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   emptyContainer: { alignItems: 'center', padding: 50 },
-  emptyText: { fontSize: 16, color: '#999' },
-  createButtonLarge: { backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25, marginTop: 15 },
-  createButtonText: { color: '#fff', fontWeight: 'bold' },
+  emptyText: { fontSize: 16, color: '#999', marginTop: 10 },
+  emptySubtext: { fontSize: 14, color: '#999', marginTop: 5 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' },
   modalContainer: { backgroundColor: '#fff', margin: 20, borderRadius: 20, padding: 20, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
@@ -391,13 +452,14 @@ const styles = StyleSheet.create({
   inputLabel: { fontSize: 14, fontWeight: '600', color: '#333', marginTop: 15, marginBottom: 5 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#fff' },
   textArea: { height: 80, textAlignVertical: 'top' },
-  bloodGroupGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  bloodGroupGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10 },
   bloodGroupOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#f0f0f0', margin: 4 },
   bloodGroupSelected: { backgroundColor: '#d32f2f' },
   bloodGroupOptionText: { fontSize: 14, color: '#333' },
-  urgencyContainer: { flexDirection: 'row', gap: 10 },
+  bloodGroupSelectedText: { color: '#fff' },
+  urgencyContainer: { flexDirection: 'row', gap: 10, marginBottom: 10 },
   urgencyOption: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
   urgencyOptionText: { color: '#fff', fontWeight: 'bold' },
-  submitButton: { backgroundColor: '#d32f2f', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 20 },
+  submitButton: { backgroundColor: '#d32f2f', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 20, marginBottom: 20 },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
 });
