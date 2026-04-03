@@ -7,7 +7,9 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
-  Modal
+  Modal,
+  ScrollView,
+  TextInput
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/firebaseConfig';
