@@ -35,8 +35,6 @@ export default function HospitalDashboard({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [hospitalLocation, setHospitalLocation] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [selectedDonors, setSelectedDonors] = useState(null);
-  const [showDonorModal, setShowDonorModal] = useState(false);
   const [formData, setFormData] = useState({
     bloodGroup: '',
     quantity: '1',
@@ -84,7 +82,10 @@ export default function HospitalDashboard({ navigation }) {
       snapshot.forEach((doc) => {
         const data = doc.data();
         console.log('Request data:', doc.id, data);
-        console.log('Donor responses:', data.donorResponses);
+        console.log('Donor responses count:', data.donorResponses?.length || 0);
+        if (data.donorResponses && data.donorResponses.length > 0) {
+          console.log('Donor details:', JSON.stringify(data.donorResponses));
+        }
         requestsList.push({ id: doc.id, ...data });
       });
       setRequests(requestsList);
@@ -184,11 +185,6 @@ export default function HospitalDashboard({ navigation }) {
     );
   };
 
-  const viewDonorDetails = (donors) => {
-    setSelectedDonors(donors);
-    setShowDonorModal(true);
-  };
-
   const activeRequests = requests.filter(r => r.status === 'active');
   const fulfilledRequests = requests.filter(r => r.status === 'fulfilled');
 
@@ -263,12 +259,12 @@ export default function HospitalDashboard({ navigation }) {
                   {item.donorResponses.map((donor, idx) => (
                     <View key={idx} style={styles.donorCard}>
                       <View style={styles.donorHeader}>
-                        <Text style={styles.donorName}>🩸 {donor.donorName}</Text>
-                        <Text style={styles.donorBlood}>{donor.bloodGroup}</Text>
+                        <Text style={styles.donorName}>🩸 {donor.donorName || donor.name || 'Anonymous'}</Text>
+                        <Text style={styles.donorBlood}>{donor.bloodGroup || 'Unknown'}</Text>
                       </View>
                       <View style={styles.donorDetails}>
                         <Text style={styles.donorDetail}>📞 Phone: {donor.phone || 'Not provided'}</Text>
-                        <Text style={styles.donorDetail}>📧 Email: {donor.email || 'Not provided'}</Text>
+                        <Text style={styles.donorDetail}>📧 Email: {donor.email || user?.email || 'Not provided'}</Text>
                         <Text style={styles.donorTime}>
                           Responded: {donor.respondedAt?.toDate().toLocaleString() || 'Just now'}
                         </Text>
@@ -278,12 +274,12 @@ export default function HospitalDashboard({ navigation }) {
                         onPress={() => {
                           Alert.alert(
                             'Contact Donor',
-                            `Name: ${donor.donorName}\nPhone: ${donor.phone}\nEmail: ${donor.email}\n\nYou can contact them using these details.`
+                            `Name: ${donor.donorName || donor.name}\nPhone: ${donor.phone}\nEmail: ${donor.email}\n\nYou can contact them using these details.`
                           );
                         }}
                       >
                         <Icon name="call" size={16} color="#fff" />
-                        <Text style={styles.contactButtonText}>Contact</Text>
+                        <Text style={styles.contactButtonText}>Contact Donor</Text>
                       </TouchableOpacity>
                     </View>
                   ))}
@@ -416,31 +412,6 @@ export default function HospitalDashboard({ navigation }) {
           </View>
         </View>
       </Modal>
-
-      {/* Donor Details Modal */}
-      <Modal visible={showDonorModal} animationType="slide" transparent={true}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Donor Details</Text>
-              <TouchableOpacity onPress={() => setShowDonorModal(false)}>
-                <Icon name="close" size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView>
-              {selectedDonors?.map((donor, idx) => (
-                <View key={idx} style={styles.donorDetailCard}>
-                  <Text style={styles.donorDetailName}>🩸 {donor.donorName}</Text>
-                  <Text style={styles.donorDetailBlood}>Blood Group: {donor.bloodGroup}</Text>
-                  <Text style={styles.donorDetailPhone}>📞 {donor.phone || 'No phone'}</Text>
-                  <Text style={styles.donorDetailEmail}>📧 {donor.email || 'No email'}</Text>
-                  <Text style={styles.donorDetailTime}>Responded: {donor.respondedAt?.toDate().toLocaleString()}</Text>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -478,7 +449,7 @@ const styles = StyleSheet.create({
   donorDetails: { marginBottom: 8 },
   donorDetail: { fontSize: 12, color: '#666', marginBottom: 2 },
   donorTime: { fontSize: 10, color: '#999', marginTop: 4 },
-  contactButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#4caf50', paddingVertical: 6, borderRadius: 6, marginTop: 6 },
+  contactButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#4caf50', paddingVertical: 8, borderRadius: 6, marginTop: 6 },
   contactButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold', marginLeft: 4 },
   noDonorsContainer: { alignItems: 'center', padding: 20 },
   noDonorsText: { fontSize: 14, color: '#999' },
@@ -507,11 +478,5 @@ const styles = StyleSheet.create({
   urgencyOption: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
   urgencyOptionText: { color: '#fff', fontWeight: 'bold' },
   submitButton: { backgroundColor: '#d32f2f', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 20, marginBottom: 20 },
-  submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  donorDetailCard: { backgroundColor: '#f9f9f9', padding: 15, borderRadius: 10, marginBottom: 10 },
-  donorDetailName: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 5 },
-  donorDetailBlood: { fontSize: 14, color: '#d32f2f', marginBottom: 3 },
-  donorDetailPhone: { fontSize: 13, color: '#666', marginBottom: 3 },
-  donorDetailEmail: { fontSize: 13, color: '#666', marginBottom: 3 },
-  donorDetailTime: { fontSize: 11, color: '#999', marginTop: 5 }
+  submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
 });
