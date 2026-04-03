@@ -19,8 +19,7 @@ import {
   onSnapshot,
   Timestamp,
   doc,
-  updateDoc,
-  getDocs
+  updateDoc
 } from 'firebase/firestore';
 import { getCurrentLocation } from '../../services/locationService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -31,14 +30,13 @@ export default function NearbyRequestScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filterBloodGroup, setFilterBloodGroup] = useState(null);
-  const [userLocation, setUserLocation] = useState(null);
   const [userData, setUserData] = useState(null);
   let unsubscribeRequests = null;
 
   const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
   useEffect(() => {
-    loadUserAndRequests();
+    loadUserData();
     
     return () => {
       if (unsubscribeRequests) {
@@ -47,91 +45,98 @@ export default function NearbyRequestScreen({ navigation }) {
     };
   }, [filterBloodGroup]);
 
-  const loadUserAndRequests = async () => {
+  const loadUserData = async () => {
     try {
-      // Load user data
+      // Get user data from users collection
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('uid', '==', user.uid));
-      const userSnapshot = await getDocs(q);
-      userSnapshot.forEach((doc) => {
-        setUserData(doc.data());
+      
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        snapshot.forEach((doc) => {
+          setUserData(doc.data());
+        });
       });
       
-      // Get location
-      const location = await getCurrentLocation();
-      setUserLocation(location);
+      // Setup requests listener after getting user data
+      setupRequestsListener();
       
-      // Setup real-time listener
-      setupRealTimeListener(location);
+      return unsubscribe;
     } catch (error) {
       console.error('Error loading user data:', error);
       setLoading(false);
     }
   };
 
-  const setupRealTimeListener = (location) => {
+  const setupRequestsListener = async () => {
     if (unsubscribeRequests) {
       unsubscribeRequests();
     }
 
-    const requestsRef = collection(db, 'bloodRequests');
-    const q = query(
-      requestsRef,
-      where('status', '==', 'active'),
-      orderBy('createdAt', 'desc')
-    );
+    try {
+      const location = await getCurrentLocation();
+      
+      const requestsRef = collection(db, 'bloodRequests');
+      const q = query(
+        requestsRef,
+        where('status', '==', 'active'),
+        orderBy('createdAt', 'desc')
+      );
 
-    unsubscribeRequests = onSnapshot(q, (snapshot) => {
-      console.log(`Found ${snapshot.size} active requests`);
-      
-      const requestsList = [];
-      
-      snapshot.forEach((docSnapshot) => {
-        const request = docSnapshot.data();
-        const requestId = docSnapshot.id;
+      unsubscribeRequests = onSnapshot(q, (snapshot) => {
+        console.log(`Found ${snapshot.size} active requests`);
         
-        // Filter by blood group if selected
-        if (filterBloodGroup && request.bloodGroup !== filterBloodGroup) {
-          return;
-        }
+        const requestsList = [];
         
-        // Check blood group compatibility with user
-        if (userData?.bloodGroup) {
-          const isCompatible = checkCompatibility(userData.bloodGroup, request.bloodGroup);
-          if (!isCompatible) return;
-        }
-        
-        // Calculate distance
-        let distance = null;
-        if (location && request.hospitalLocation) {
-          distance = calculateDistance(
-            location.latitude,
-            location.longitude,
-            request.hospitalLocation.latitude,
-            request.hospitalLocation.longitude
-          );
+        snapshot.forEach((docSnapshot) => {
+          const request = docSnapshot.data();
+          const requestId = docSnapshot.id;
           
-          // Check if within radius
-          if (distance > request.radius) return;
-        }
-        
-        requestsList.push({
-          id: requestId,
-          ...request,
-          distance: distance
+          // Filter by blood group if selected
+          if (filterBloodGroup && request.bloodGroup !== filterBloodGroup) {
+            return;
+          }
+          
+          // Check blood group compatibility with user
+          if (userData?.bloodGroup) {
+            const isCompatible = checkCompatibility(userData.bloodGroup, request.bloodGroup);
+            if (!isCompatible) return;
+          }
+          
+          // Calculate distance
+          let distance = null;
+          if (location && request.hospitalLocation) {
+            distance = calculateDistance(
+              location.latitude,
+              location.longitude,
+              request.hospitalLocation.latitude,
+              request.hospitalLocation.longitude
+            );
+            
+            // Check if within radius
+            if (distance > request.radius) return;
+          }
+          
+          requestsList.push({
+            id: requestId,
+            ...request,
+            distance: distance
+          });
         });
+        
+        // Sort by distance (closest first)
+        requestsList.sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
+        setRequests(requestsList);
+        setLoading(false);
+        setRefreshing(false);
+      }, (error) => {
+        console.error('Error in real-time listener:', error);
+        setLoading(false);
+        setRefreshing(false);
       });
-      
-      // Sort by distance (closest first)
-      requestsList.sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
-      setRequests(requestsList);
+    } catch (error) {
+      console.error('Error setting up listener:', error);
       setLoading(false);
-      setRefreshing(false);
-    }, (error) => {
-      console.error('Error in real-time listener:', error);
-      setLoading(false);
-      setRefreshing(false);
-    });
+    }
   };
 
   const checkCompatibility = (donorBlood, recipientBlood) => {
@@ -149,12 +154,24 @@ export default function NearbyRequestScreen({ navigation }) {
   };
 
   const respondToRequest = async (request) => {
+    if (!userData?.phone) {
+      Alert.alert(
+        'Phone Number Required',
+        'Please update your profile with a phone number so the hospital can contact you.',
+        [
+          { text: 'Later', style: 'cancel' },
+          { text: 'Update Now', onPress: () => navigation.navigate('Profile') }
+        ]
+      );
+      return;
+    }
+
     const donorDetails = {
       donorId: user.uid,
       donorName: userData?.name || 'Anonymous Donor',
       bloodGroup: userData?.bloodGroup,
-      phone: userData?.phone || 'Not provided',
-      email: user?.email || 'Not provided',
+      phone: userData?.phone,
+      email: user?.email,
       respondedAt: Timestamp.now(),
       status: 'pending'
     };
@@ -182,9 +199,13 @@ export default function NearbyRequestScreen({ navigation }) {
                 lastResponseAt: Timestamp.now()
               });
               
-              Alert.alert('Success', 'Response sent! The hospital will contact you.');
+              Alert.alert(
+                'Response Sent!', 
+                `Thank you! ${request.hospitalName} will contact you at ${userData.phone}`
+              );
             } catch (error) {
-              Alert.alert('Error', 'Failed to send response');
+              console.error('Error responding:', error);
+              Alert.alert('Error', 'Failed to send response. Please try again.');
             }
           }
         }
@@ -208,12 +229,7 @@ export default function NearbyRequestScreen({ navigation }) {
 
   const onRefresh = () => {
     setRefreshing(true);
-    getCurrentLocation().then(location => {
-      setUserLocation(location);
-      setupRealTimeListener(location);
-    }).catch(() => {
-      setRefreshing(false);
-    });
+    setupRequestsListener();
   };
 
   if (loading) {
