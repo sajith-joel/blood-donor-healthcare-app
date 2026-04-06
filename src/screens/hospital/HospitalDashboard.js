@@ -12,7 +12,6 @@ import {
   TextInput,
   ActivityIndicator,
   Linking,
-  Switch,
   Share
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
@@ -27,8 +26,7 @@ import {
   orderBy,
   Timestamp,
   onSnapshot,
-  deleteDoc,
-  getDocs
+  deleteDoc
 } from 'firebase/firestore';
 import { getCurrentLocation } from '../../services/locationService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -37,11 +35,12 @@ export default function HospitalDashboard({ navigation }) {
   const { user, logout } = useAuth();
   const [requests, setRequests] = useState([]);
   const [showRequestForm, setShowRequestForm] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [hospitalLocation, setHospitalLocation] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [selectedTab, setSelectedTab] = useState('active'); // active, fulfilled, all
-  const [showStats, setShowStats] = useState(true);
+  const [selectedTab, setSelectedTab] = useState('active');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBloodGroup, setFilterBloodGroup] = useState(null);
   const [formData, setFormData] = useState({
@@ -52,7 +51,8 @@ export default function HospitalDashboard({ navigation }) {
     patientName: '',
     patientAge: '',
     patientGender: '',
-    notes: ''
+    notes: '',
+    searchRadius: 3 // Default 3km
   });
 
   const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -61,6 +61,12 @@ export default function HospitalDashboard({ navigation }) {
     { value: 'normal', label: 'Normal', color: '#4caf50', icon: 'info' },
     { value: 'high', label: 'High', color: '#ff9800', icon: 'warning' },
     { value: 'emergency', label: 'Emergency', color: '#d32f2f', icon: 'error' }
+  ];
+  const radiusOptions = [
+    { value: 3, label: '3 km', description: 'Standard range', icon: 'near-me' },
+    { value: 5, label: '5 km', description: 'Extended range for rare blood', icon: 'explore' },
+    { value: 10, label: '10 km', description: 'Wide range for critical cases', icon: 'public' },
+    { value: 15, label: '15 km', description: 'Maximum range', icon: 'flight' }
   ];
 
   useEffect(() => {
@@ -88,18 +94,23 @@ export default function HospitalDashboard({ navigation }) {
       orderBy('createdAt', 'desc')
     );
 
-    return onSnapshot(q, (snapshot) => {
-      const requestsList = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        requestsList.push({ id: doc.id, ...data });
-      });
-      setRequests(requestsList);
-      setLoading(false);
-    }, (error) => {
-      console.error('Error in snapshot:', error);
-      setLoading(false);
-    });
+    return onSnapshot(q, 
+      (snapshot) => {
+        const requestsList = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          requestsList.push({ id: doc.id, ...data });
+        });
+        setRequests(requestsList);
+        setLoading(false);
+        setRefreshing(false);
+      },
+      (error) => {
+        console.error('Error in snapshot:', error);
+        setLoading(false);
+        setRefreshing(false);
+      }
+    );
   };
 
   const createBloodRequest = async () => {
@@ -113,9 +124,30 @@ export default function HospitalDashboard({ navigation }) {
       return;
     }
 
+    // Auto-set radius for rare blood groups
     const isRare = ['AB-', 'B-', 'A-', 'O-'].includes(formData.bloodGroup);
-    const radius = isRare ? 5 : 3;
+    let finalRadius = formData.searchRadius;
+    
+    // Suggest extended radius for rare blood groups
+    if (isRare && formData.searchRadius === 3) {
+      Alert.alert(
+        'Rare Blood Group Detected',
+        `${formData.bloodGroup} is a rare blood group. Would you like to increase the search radius to 5km or more to reach more donors?`,
+        [
+          { text: 'Keep 3km', onPress: () => createRequest(finalRadius) },
+          { text: 'Increase to 5km', onPress: () => createRequest(5) },
+          { text: 'Increase to 10km', onPress: () => createRequest(10) }
+        ]
+      );
+      return;
+    }
+    
+    createRequest(finalRadius);
+  };
 
+  const createRequest = async (radius) => {
+    const isRare = ['AB-', 'B-', 'A-', 'O-'].includes(formData.bloodGroup);
+    
     setLoading(true);
 
     try {
@@ -146,7 +178,7 @@ export default function HospitalDashboard({ navigation }) {
 
       await addDoc(collection(db, 'bloodRequests'), requestData);
       
-      Alert.alert('Success', `Blood request created! Searching within ${radius}km`);
+      Alert.alert('Success', `Blood request created! Searching within ${radius}km radius`);
       setShowRequestForm(false);
       setFormData({
         bloodGroup: '',
@@ -156,7 +188,8 @@ export default function HospitalDashboard({ navigation }) {
         patientName: '',
         patientAge: '',
         patientGender: '',
-        notes: ''
+        notes: '',
+        searchRadius: 3
       });
     } catch (error) {
       console.error('Error creating request:', error);
@@ -164,6 +197,31 @@ export default function HospitalDashboard({ navigation }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const updateSearchRadius = async (requestId, newRadius) => {
+    Alert.alert(
+      'Update Search Radius',
+      `Are you sure you want to change the search radius to ${newRadius}km? This will help reach more donors.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Update',
+          onPress: async () => {
+            try {
+              const requestRef = doc(db, 'bloodRequests', requestId);
+              await updateDoc(requestRef, {
+                radius: newRadius,
+                updatedAt: Timestamp.now()
+              });
+              Alert.alert('Success', `Search radius updated to ${newRadius}km`);
+            } catch (error) {
+              Alert.alert('Error', 'Failed to update radius');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const updateRequestStatus = async (requestId, newStatus) => {
@@ -245,8 +303,9 @@ export default function HospitalDashboard({ navigation }) {
         `Quantity: ${request.quantity} units\n` +
         `Department: ${request.department}\n` +
         `Urgency: ${request.urgency.toUpperCase()}\n` +
+        `Search Radius: ${request.radius}km\n` +
         `Patient: ${request.patientName || 'Not specified'}\n\n` +
-        `Please visit the hospital if you can donate. Share this message to help find donors!`;
+        `Please visit the hospital if you can donate within ${request.radius}km radius. Share this message to help find donors!`;
       
       await Share.share({
         message: message,
@@ -274,18 +333,27 @@ export default function HospitalDashboard({ navigation }) {
     );
   };
 
-  // Filter requests based on tab, search, and blood group
+  const formatResponseTime = (timestamp) => {
+    if (!timestamp) return 'Just now';
+    const date = timestamp.toDate();
+    const now = new Date();
+    const diff = Math.floor((now - date) / 60000);
+    
+    if (diff < 1) return 'Just now';
+    if (diff < 60) return `${diff} minutes ago`;
+    if (diff < 1440) return `${Math.floor(diff / 60)} hours ago`;
+    return `${Math.floor(diff / 1440)} days ago`;
+  };
+
   const getFilteredRequests = () => {
     let filtered = [...requests];
     
-    // Filter by status
     if (selectedTab === 'active') {
       filtered = filtered.filter(r => r.status === 'active');
     } else if (selectedTab === 'fulfilled') {
       filtered = filtered.filter(r => r.status === 'fulfilled');
     }
     
-    // Filter by search query
     if (searchQuery) {
       filtered = filtered.filter(r => 
         r.bloodGroup?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -294,7 +362,6 @@ export default function HospitalDashboard({ navigation }) {
       );
     }
     
-    // Filter by blood group
     if (filterBloodGroup) {
       filtered = filtered.filter(r => r.bloodGroup === filterBloodGroup);
     }
@@ -305,12 +372,11 @@ export default function HospitalDashboard({ navigation }) {
   const getStatistics = () => {
     const active = requests.filter(r => r.status === 'active').length;
     const fulfilled = requests.filter(r => r.status === 'fulfilled').length;
-    const cancelled = requests.filter(r => r.status === 'cancelled').length;
     const totalResponses = requests.reduce((sum, r) => sum + (r.donorResponses?.length || 0), 0);
-    const rareRequests = requests.filter(r => r.isRare).length;
     const emergencyRequests = requests.filter(r => r.urgency === 'emergency' && r.status === 'active').length;
+    const rareRequests = requests.filter(r => r.isRare && r.status === 'active').length;
     
-    return { active, fulfilled, cancelled, totalResponses, rareRequests, emergencyRequests };
+    return { active, fulfilled, totalResponses, emergencyRequests, rareRequests };
   };
 
   const stats = getStatistics();
@@ -349,25 +415,26 @@ export default function HospitalDashboard({ navigation }) {
           <TouchableOpacity style={styles.statCard} onPress={() => setSelectedTab('active')}>
             <Text style={styles.statNumber}>{stats.active}</Text>
             <Text style={styles.statLabel}>Active</Text>
-            <Text style={styles.statSubLabel}>Requests</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.statCard} onPress={() => setSelectedTab('fulfilled')}>
             <Text style={styles.statNumber}>{stats.fulfilled}</Text>
             <Text style={styles.statLabel}>Fulfilled</Text>
-            <Text style={styles.statSubLabel}>Completed</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.totalResponses}</Text>
-            <Text style={styles.statLabel}>Total</Text>
-            <Text style={styles.statSubLabel}>Responses</Text>
+            <Text style={styles.statLabel}>Responses</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={[styles.statCard, { backgroundColor: '#ff9800' }]}>
             <Text style={[styles.statNumber, { color: '#fff' }]}>{stats.emergencyRequests}</Text>
             <Text style={[styles.statLabel, { color: '#fff' }]}>Emergency</Text>
-            <Text style={[styles.statSubLabel, { color: '#fff' }]}>Active</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.statCard, { backgroundColor: '#d32f2f' }]}>
+            <Text style={[styles.statNumber, { color: '#fff' }]}>{stats.rareRequests}</Text>
+            <Text style={[styles.statLabel, { color: '#fff' }]}>Rare Blood</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -384,7 +451,7 @@ export default function HospitalDashboard({ navigation }) {
           style={[styles.tab, selectedTab === 'active' && styles.activeTab]}
           onPress={() => setSelectedTab('active')}
         >
-          <Text style={[styles.tabText, selectedTab === 'active' && styles.activeTabText]}>Active</Text>
+          <Text style={[styles.tabText, selectedTab === 'active' && styles.activeTabText]}>Active Requests</Text>
           {stats.active > 0 && <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{stats.active}</Text></View>}
         </TouchableOpacity>
         <TouchableOpacity 
@@ -401,7 +468,7 @@ export default function HospitalDashboard({ navigation }) {
           <Icon name="search" size={20} color="#999" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search by blood group, department, or patient..."
+            placeholder="Search by blood group, department..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor="#999"
@@ -460,14 +527,37 @@ export default function HospitalDashboard({ navigation }) {
               </TouchableOpacity>
             </View>
 
+            {/* Search Radius Section */}
+            <View style={styles.radiusSection}>
+              <View style={styles.radiusInfo}>
+                <Icon name="near-me" size={16} color="#2196f3" />
+                <Text style={styles.radiusLabel}>Search Radius:</Text>
+                <Text style={styles.radiusValue}>{item.radius} km</Text>
+                {item.isRare && (
+                  <View style={styles.rareRadiusBadge}>
+                    <Text style={styles.rareRadiusText}>Extended for rare blood</Text>
+                  </View>
+                )}
+              </View>
+              {item.status === 'active' && (
+                <TouchableOpacity 
+                  style={styles.editRadiusButton}
+                  onPress={() => updateSearchRadius(item.id, item.radius === 3 ? 5 : item.radius === 5 ? 10 : 15)}
+                >
+                  <Icon name="edit" size={16} color="#fff" />
+                  <Text style={styles.editRadiusText}>Expand Radius</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
             {/* Patient Info */}
             {(item.patientName || item.patientAge || item.patientGender) && (
               <View style={styles.patientInfo}>
                 <Icon name="person" size={16} color="#d32f2f" />
                 <Text style={styles.patientInfoText}>
-                  {item.patientName && `Name: ${item.patientName}`}
+                  {item.patientName && `👤 ${item.patientName}`}
                   {item.patientAge && ` | Age: ${item.patientAge}`}
-                  {item.patientGender && ` | Gender: ${item.patientGender}`}
+                  {item.patientGender && ` | ${item.patientGender}`}
                 </Text>
               </View>
             )}
@@ -489,7 +579,7 @@ export default function HospitalDashboard({ navigation }) {
                 </Text>
                 {(item.donorResponses?.length || 0) > 0 && (
                   <Text style={styles.responseTimeText}>
-                    Latest: {item.donorResponses[item.donorResponses.length - 1]?.respondedAt?.toDate().toLocaleTimeString()}
+                    Newest: {formatResponseTime(item.donorResponses[item.donorResponses.length - 1]?.respondedAt)}
                   </Text>
                 )}
               </View>
@@ -505,7 +595,7 @@ export default function HospitalDashboard({ navigation }) {
                         </View>
                         <View style={styles.donorTimeContainer}>
                           <Text style={styles.donorTime}>
-                            {donor.respondedAt?.toDate().toLocaleString() || 'Just now'}
+                            {formatResponseTime(donor.respondedAt)}
                           </Text>
                         </View>
                       </View>
@@ -539,7 +629,7 @@ export default function HospitalDashboard({ navigation }) {
                       </View>
                       
                       <View style={styles.responseStatus}>
-                        <Text style={styles.statusText}>Status: Pending Contact</Text>
+                        <Text style={styles.statusText}>✅ Status: Ready to donate</Text>
                       </View>
                     </View>
                   ))}
@@ -550,7 +640,7 @@ export default function HospitalDashboard({ navigation }) {
                   <Text style={styles.noDonorsText}>No donors have responded yet</Text>
                   <Text style={styles.noDonorsSubtext}>Share this request to get responses</Text>
                   <TouchableOpacity style={styles.shareRequestButton} onPress={() => shareRequest(item)}>
-                    <Text style={styles.shareRequestButtonText}>Share Request</Text>
+                    <Text style={styles.shareRequestButtonText}>📢 Share Request</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -591,8 +681,7 @@ export default function HospitalDashboard({ navigation }) {
             refreshing={refreshing} 
             onRefresh={() => {
               setRefreshing(true);
-              subscribeToRequests();
-              setTimeout(() => setRefreshing(false), 1000);
+              setRefreshing(false);
             }} 
           />
         }
@@ -677,6 +766,28 @@ export default function HospitalDashboard({ navigation }) {
                 ))}
               </ScrollView>
 
+              <Text style={styles.inputLabel}>Search Radius *</Text>
+              <Text style={styles.radiusHelperText}>Select how far to search for donors</Text>
+              <View style={styles.radiusGrid}>
+                {radiusOptions.map(option => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.radiusOption,
+                      formData.searchRadius === option.value && styles.radiusOptionSelected,
+                      formData.searchRadius === option.value && { borderColor: '#d32f2f', borderWidth: 2 }
+                    ]}
+                    onPress={() => setFormData({...formData, searchRadius: option.value})}
+                  >
+                    <Icon name={option.icon} size={24} color={formData.searchRadius === option.value ? '#d32f2f' : '#666'} />
+                    <Text style={[styles.radiusOptionValue, formData.searchRadius === option.value && styles.radiusOptionValueSelected]}>
+                      {option.label}
+                    </Text>
+                    <Text style={styles.radiusOptionDesc}>{option.description}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <Text style={styles.inputLabel}>Urgency Level *</Text>
               <View style={styles.urgencyContainer}>
                 {urgencyLevels.map(level => (
@@ -754,10 +865,9 @@ const styles = StyleSheet.create({
   // Stats
   statsScrollView: { flexGrow: 0 },
   statsContainer: { flexDirection: 'row', padding: 15, gap: 12 },
-  statCard: { backgroundColor: '#fff', padding: 15, borderRadius: 12, alignItems: 'center', minWidth: 100, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4 },
+  statCard: { backgroundColor: '#fff', padding: 15, borderRadius: 12, alignItems: 'center', minWidth: 90, elevation: 2 },
   statNumber: { fontSize: 28, fontWeight: 'bold', color: '#d32f2f' },
   statLabel: { fontSize: 12, color: '#666', marginTop: 4 },
-  statSubLabel: { fontSize: 10, color: '#999' },
   
   // Location Button
   locationButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#2196f3', marginHorizontal: 15, marginTop: 5, padding: 12, borderRadius: 10, gap: 8 },
@@ -784,7 +894,7 @@ const styles = StyleSheet.create({
   
   // Request Card
   requestCard: { backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, elevation: 2 },
-  requestHeader: { flexDirection: 'row', marginBottom: 15 },
+  requestHeader: { flexDirection: 'row', marginBottom: 12 },
   bloodGroupCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center', marginRight: 12, position: 'relative' },
   bloodGroupText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   rareStar: { position: 'absolute', top: -5, right: -5, fontSize: 12 },
@@ -796,6 +906,16 @@ const styles = StyleSheet.create({
   quantityText: { fontSize: 14, color: '#666', marginTop: 2 },
   dateText: { fontSize: 10, color: '#999', marginTop: 4 },
   shareButton: { padding: 8 },
+  
+  // Radius Section
+  radiusSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f0f7ff', padding: 10, borderRadius: 8, marginBottom: 10 },
+  radiusInfo: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 },
+  radiusLabel: { fontSize: 12, color: '#666' },
+  radiusValue: { fontSize: 14, fontWeight: 'bold', color: '#2196f3' },
+  rareRadiusBadge: { backgroundColor: '#ff9800', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 },
+  rareRadiusText: { fontSize: 10, color: '#fff', fontWeight: 'bold' },
+  editRadiusButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2196f3', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, gap: 4 },
+  editRadiusText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   
   // Patient Info
   patientInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', gap: 8 },
@@ -824,7 +944,7 @@ const styles = StyleSheet.create({
   emailButton: { backgroundColor: '#2196f3', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 15, marginLeft: 8 },
   emailButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   responseStatus: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
-  statusText: { fontSize: 11, color: '#ff9800', fontWeight: '500' },
+  statusText: { fontSize: 11, color: '#4caf50', fontWeight: '500' },
   
   noDonorsContainer: { alignItems: 'center', padding: 30 },
   noDonorsText: { fontSize: 14, color: '#999', marginTop: 10 },
@@ -852,6 +972,7 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#d32f2f' },
   inputLabel: { fontSize: 14, fontWeight: '600', color: '#333', marginTop: 15, marginBottom: 8 },
+  radiusHelperText: { fontSize: 12, color: '#666', marginBottom: 10 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#fff' },
   textArea: { height: 80, textAlignVertical: 'top' },
   rowInput: { flexDirection: 'row', gap: 10 },
@@ -878,6 +999,14 @@ const styles = StyleSheet.create({
   departmentSelected: { backgroundColor: '#d32f2f' },
   departmentOptionText: { fontSize: 14, color: '#333' },
   departmentSelectedText: { color: '#fff' },
+  
+  // Radius Grid
+  radiusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
+  radiusOption: { flex: 1, minWidth: '45%', backgroundColor: '#f5f5f5', padding: 15, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#e0e0e0' },
+  radiusOptionSelected: { backgroundColor: '#fff0f0' },
+  radiusOptionValue: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 8 },
+  radiusOptionValueSelected: { color: '#d32f2f' },
+  radiusOptionDesc: { fontSize: 10, color: '#999', marginTop: 4 },
   
   // Urgency
   urgencyContainer: { flexDirection: 'row', gap: 10, marginBottom: 10 },
