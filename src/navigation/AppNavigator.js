@@ -5,7 +5,7 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import { useAuth } from '../context/AuthContext';
 
 // Donor Screens
-import DonorHomeScreen from '../screens/donor/HomeScreen';
+import DonorHomeScreen from '../screens/donor/DonorHomeScreen';
 import NearbyRequestScreen from '../screens/donor/NearbyRequestScreen';
 import ProfileScreen from '../screens/donor/ProfileScreen';
 import DonationHistoryScreen from '../screens/donor/DonationHistoryScreen';
