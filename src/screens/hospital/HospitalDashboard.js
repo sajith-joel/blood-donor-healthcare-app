@@ -11,7 +11,9 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
-  Linking
+  Linking,
+  Switch,
+  Share
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/firebaseConfig';
@@ -24,7 +26,9 @@ import {
   doc,
   orderBy,
   Timestamp,
-  onSnapshot
+  onSnapshot,
+  deleteDoc,
+  getDocs
 } from 'firebase/firestore';
 import { getCurrentLocation } from '../../services/locationService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -36,6 +40,10 @@ export default function HospitalDashboard({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [hospitalLocation, setHospitalLocation] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedTab, setSelectedTab] = useState('active'); // active, fulfilled, all
+  const [showStats, setShowStats] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterBloodGroup, setFilterBloodGroup] = useState(null);
   const [formData, setFormData] = useState({
     bloodGroup: '',
     quantity: '1',
@@ -43,14 +51,16 @@ export default function HospitalDashboard({ navigation }) {
     urgency: 'normal',
     patientName: '',
     patientAge: '',
+    patientGender: '',
     notes: ''
   });
 
   const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+  const departments = ['Emergency', 'ICU', 'Surgery', 'Oncology', 'Pediatrics', 'General Ward', 'Maternity', 'Operation Theatre'];
   const urgencyLevels = [
-    { value: 'normal', label: 'Normal', color: '#4caf50' },
-    { value: 'high', label: 'High', color: '#ff9800' },
-    { value: 'emergency', label: 'Emergency', color: '#d32f2f' }
+    { value: 'normal', label: 'Normal', color: '#4caf50', icon: 'info' },
+    { value: 'high', label: 'High', color: '#ff9800', icon: 'warning' },
+    { value: 'emergency', label: 'Emergency', color: '#d32f2f', icon: 'error' }
   ];
 
   useEffect(() => {
@@ -72,8 +82,6 @@ export default function HospitalDashboard({ navigation }) {
   const subscribeToRequests = () => {
     if (!user?.uid) return;
     
-    console.log('Setting up real-time listener for hospital:', user.uid);
-    
     const q = query(
       collection(db, 'bloodRequests'),
       where('hospitalId', '==', user.uid),
@@ -84,7 +92,6 @@ export default function HospitalDashboard({ navigation }) {
       const requestsList = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
-        console.log(`Request ${doc.id}: Blood=${data.bloodGroup}, Status=${data.status}, Responses=${data.donorResponses?.length || 0}`);
         requestsList.push({ id: doc.id, ...data });
       });
       setRequests(requestsList);
@@ -122,6 +129,7 @@ export default function HospitalDashboard({ navigation }) {
         urgency: formData.urgency,
         patientName: formData.patientName,
         patientAge: formData.patientAge,
+        patientGender: formData.patientGender,
         notes: formData.notes,
         status: 'active',
         radius: radius,
@@ -131,7 +139,9 @@ export default function HospitalDashboard({ navigation }) {
           latitude: hospitalLocation.latitude,
           longitude: hospitalLocation.longitude
         },
-        donorResponses: []
+        donorResponses: [],
+        totalResponses: 0,
+        updatedAt: Timestamp.now()
       };
 
       await addDoc(collection(db, 'bloodRequests'), requestData);
@@ -145,6 +155,7 @@ export default function HospitalDashboard({ navigation }) {
         urgency: 'normal',
         patientName: '',
         patientAge: '',
+        patientGender: '',
         notes: ''
       });
     } catch (error) {
@@ -156,29 +167,46 @@ export default function HospitalDashboard({ navigation }) {
   };
 
   const updateRequestStatus = async (requestId, newStatus) => {
-    try {
-      const requestRef = doc(db, 'bloodRequests', requestId);
-      await updateDoc(requestRef, {
-        status: newStatus,
-        updatedAt: Timestamp.now()
-      });
-      Alert.alert('Success', `Request marked as ${newStatus}`);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update request');
-    }
-  };
-
-  const handleLogout = () => {
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      'Confirm Status Change',
+      `Are you sure you want to mark this request as ${newStatus}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Logout',
+          text: 'Confirm',
+          onPress: async () => {
+            try {
+              const requestRef = doc(db, 'bloodRequests', requestId);
+              await updateDoc(requestRef, {
+                status: newStatus,
+                updatedAt: Timestamp.now()
+              });
+              Alert.alert('Success', `Request marked as ${newStatus}`);
+            } catch (error) {
+              Alert.alert('Error', 'Failed to update request');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const deleteRequest = async (requestId) => {
+    Alert.alert(
+      'Delete Request',
+      'Are you sure you want to delete this request? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await logout();
+            try {
+              await deleteDoc(doc(db, 'bloodRequests', requestId));
+              Alert.alert('Success', 'Request deleted successfully');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete request');
+            }
           }
         }
       ]
@@ -210,8 +238,83 @@ export default function HospitalDashboard({ navigation }) {
     }
   };
 
-  const activeRequests = requests.filter(r => r.status === 'active');
-  const fulfilledRequests = requests.filter(r => r.status === 'fulfilled');
+  const shareRequest = async (request) => {
+    try {
+      const message = `URGENT: Blood needed at ${request.hospitalName}\n\n` +
+        `Blood Group: ${request.bloodGroup}\n` +
+        `Quantity: ${request.quantity} units\n` +
+        `Department: ${request.department}\n` +
+        `Urgency: ${request.urgency.toUpperCase()}\n` +
+        `Patient: ${request.patientName || 'Not specified'}\n\n` +
+        `Please visit the hospital if you can donate. Share this message to help find donors!`;
+      
+      await Share.share({
+        message: message,
+        title: 'Blood Request - Please Help'
+      });
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            await logout();
+          }
+        }
+      ]
+    );
+  };
+
+  // Filter requests based on tab, search, and blood group
+  const getFilteredRequests = () => {
+    let filtered = [...requests];
+    
+    // Filter by status
+    if (selectedTab === 'active') {
+      filtered = filtered.filter(r => r.status === 'active');
+    } else if (selectedTab === 'fulfilled') {
+      filtered = filtered.filter(r => r.status === 'fulfilled');
+    }
+    
+    // Filter by search query
+    if (searchQuery) {
+      filtered = filtered.filter(r => 
+        r.bloodGroup?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        r.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        r.patientName?.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+    
+    // Filter by blood group
+    if (filterBloodGroup) {
+      filtered = filtered.filter(r => r.bloodGroup === filterBloodGroup);
+    }
+    
+    return filtered;
+  };
+
+  const getStatistics = () => {
+    const active = requests.filter(r => r.status === 'active').length;
+    const fulfilled = requests.filter(r => r.status === 'fulfilled').length;
+    const cancelled = requests.filter(r => r.status === 'cancelled').length;
+    const totalResponses = requests.reduce((sum, r) => sum + (r.donorResponses?.length || 0), 0);
+    const rareRequests = requests.filter(r => r.isRare).length;
+    const emergencyRequests = requests.filter(r => r.urgency === 'emergency' && r.status === 'active').length;
+    
+    return { active, fulfilled, cancelled, totalResponses, rareRequests, emergencyRequests };
+  };
+
+  const stats = getStatistics();
+  const filteredRequests = getFilteredRequests();
 
   if (loading && requests.length === 0) {
     return (
@@ -236,31 +339,102 @@ export default function HospitalDashboard({ navigation }) {
       </View>
 
       {/* Stats Cards */}
-      <View style={styles.statsContainer}>
-        <TouchableOpacity style={styles.statCard} onPress={() => setShowRequestForm(true)}>
-          <Icon name="add-circle" size={40} color="#d32f2f" />
-          <Text style={styles.statLabel}>New Request</Text>
-        </TouchableOpacity>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{activeRequests.length}</Text>
-          <Text style={styles.statLabel}>Active</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsScrollView}>
+        <View style={styles.statsContainer}>
+          <TouchableOpacity style={styles.statCard} onPress={() => setShowRequestForm(true)}>
+            <Icon name="add-circle" size={32} color="#d32f2f" />
+            <Text style={styles.statLabel}>New Request</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.statCard} onPress={() => setSelectedTab('active')}>
+            <Text style={styles.statNumber}>{stats.active}</Text>
+            <Text style={styles.statLabel}>Active</Text>
+            <Text style={styles.statSubLabel}>Requests</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.statCard} onPress={() => setSelectedTab('fulfilled')}>
+            <Text style={styles.statNumber}>{stats.fulfilled}</Text>
+            <Text style={styles.statLabel}>Fulfilled</Text>
+            <Text style={styles.statSubLabel}>Completed</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.statCard}>
+            <Text style={styles.statNumber}>{stats.totalResponses}</Text>
+            <Text style={styles.statLabel}>Total</Text>
+            <Text style={styles.statSubLabel}>Responses</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={[styles.statCard, { backgroundColor: '#ff9800' }]}>
+            <Text style={[styles.statNumber, { color: '#fff' }]}>{stats.emergencyRequests}</Text>
+            <Text style={[styles.statLabel, { color: '#fff' }]}>Emergency</Text>
+            <Text style={[styles.statSubLabel, { color: '#fff' }]}>Active</Text>
+          </TouchableOpacity>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{fulfilledRequests.length}</Text>
-          <Text style={styles.statLabel}>Fulfilled</Text>
-        </View>
-      </View>
+      </ScrollView>
 
       {/* Location Button */}
       <TouchableOpacity style={styles.locationButton} onPress={openHospitalLocationOnMap}>
         <Icon name="my-location" size={20} color="#fff" />
-        <Text style={styles.locationButtonText}>View My Hospital Location</Text>
+        <Text style={styles.locationButtonText}>View Hospital Location on Map</Text>
       </TouchableOpacity>
 
-      {/* Active Requests List */}
-      <Text style={styles.sectionTitle}>Active Blood Requests</Text>
+      {/* Tabs */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity 
+          style={[styles.tab, selectedTab === 'active' && styles.activeTab]}
+          onPress={() => setSelectedTab('active')}
+        >
+          <Text style={[styles.tabText, selectedTab === 'active' && styles.activeTabText]}>Active</Text>
+          {stats.active > 0 && <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{stats.active}</Text></View>}
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, selectedTab === 'fulfilled' && styles.activeTab]}
+          onPress={() => setSelectedTab('fulfilled')}
+        >
+          <Text style={[styles.tabText, selectedTab === 'fulfilled' && styles.activeTabText]}>Fulfilled</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Search and Filter */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBox}>
+          <Icon name="search" size={20} color="#999" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by blood group, department, or patient..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholderTextColor="#999"
+          />
+          {searchQuery ? (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Icon name="close" size={20} color="#999" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+          <TouchableOpacity 
+            style={[styles.filterChip, !filterBloodGroup && styles.activeFilterChip]}
+            onPress={() => setFilterBloodGroup(null)}
+          >
+            <Text style={[styles.filterChipText, !filterBloodGroup && styles.activeFilterChipText]}>All</Text>
+          </TouchableOpacity>
+          {bloodGroups.map(group => (
+            <TouchableOpacity 
+              key={group}
+              style={[styles.filterChip, filterBloodGroup === group && styles.activeFilterChip]}
+              onPress={() => setFilterBloodGroup(filterBloodGroup === group ? null : group)}
+            >
+              <Text style={[styles.filterChipText, filterBloodGroup === group && styles.activeFilterChipText]}>{group}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
+      {/* Requests List */}
       <FlatList
-        data={activeRequests}
+        data={filteredRequests}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View style={styles.requestCard}>
@@ -268,26 +442,41 @@ export default function HospitalDashboard({ navigation }) {
             <View style={styles.requestHeader}>
               <View style={styles.bloodGroupCircle}>
                 <Text style={styles.bloodGroupText}>{item.bloodGroup}</Text>
+                {item.isRare && <Text style={styles.rareStar}>⭐</Text>}
               </View>
               <View style={styles.requestHeaderInfo}>
-                <Text style={styles.departmentText}>{item.department || 'Blood Bank'}</Text>
-                <Text style={styles.quantityText}>Need {item.quantity} unit(s)</Text>
-                <View style={[styles.urgencyBadge, { backgroundColor: urgencyLevels.find(u => u.value === item.urgency)?.color || '#4caf50' }]}>
-                  <Text style={styles.urgencyText}>{item.urgency.toUpperCase()}</Text>
-                </View>
-                {item.isRare && (
-                  <View style={styles.rareBadge}>
-                    <Text style={styles.rareText}>⭐ RARE BLOOD</Text>
+                <View style={styles.titleRow}>
+                  <Text style={styles.departmentText}>{item.department || 'Blood Bank'}</Text>
+                  <View style={[styles.urgencyBadge, { backgroundColor: urgencyLevels.find(u => u.value === item.urgency)?.color || '#4caf50' }]}>
+                    <Icon name={urgencyLevels.find(u => u.value === item.urgency)?.icon || 'info'} size={12} color="#fff" />
+                    <Text style={styles.urgencyText}>{item.urgency.toUpperCase()}</Text>
                   </View>
-                )}
+                </View>
+                <Text style={styles.quantityText}>Need {item.quantity} unit(s)</Text>
+                <Text style={styles.dateText}>{item.createdAt?.toDate().toLocaleString() || 'Just now'}</Text>
               </View>
+              <TouchableOpacity onPress={() => shareRequest(item)} style={styles.shareButton}>
+                <Icon name="share" size={20} color="#666" />
+              </TouchableOpacity>
             </View>
 
             {/* Patient Info */}
-            {item.patientName && (
+            {(item.patientName || item.patientAge || item.patientGender) && (
               <View style={styles.patientInfo}>
-                <Icon name="person" size={16} color="#666" />
-                <Text style={styles.patientInfoText}>Patient: {item.patientName}</Text>
+                <Icon name="person" size={16} color="#d32f2f" />
+                <Text style={styles.patientInfoText}>
+                  {item.patientName && `Name: ${item.patientName}`}
+                  {item.patientAge && ` | Age: ${item.patientAge}`}
+                  {item.patientGender && ` | Gender: ${item.patientGender}`}
+                </Text>
+              </View>
+            )}
+
+            {/* Notes */}
+            {item.notes && (
+              <View style={styles.notesContainer}>
+                <Icon name="note" size={14} color="#666" />
+                <Text style={styles.notesText}>{item.notes}</Text>
               </View>
             )}
 
@@ -298,6 +487,11 @@ export default function HospitalDashboard({ navigation }) {
                 <Text style={styles.donorSectionTitle}>
                   Donor Responses ({item.donorResponses?.length || 0})
                 </Text>
+                {(item.donorResponses?.length || 0) > 0 && (
+                  <Text style={styles.responseTimeText}>
+                    Latest: {item.donorResponses[item.donorResponses.length - 1]?.respondedAt?.toDate().toLocaleTimeString()}
+                  </Text>
+                )}
               </View>
               
               {item.donorResponses && item.donorResponses.length > 0 ? (
@@ -354,30 +548,41 @@ export default function HospitalDashboard({ navigation }) {
                 <View style={styles.noDonorsContainer}>
                   <Icon name="people-outline" size={40} color="#ccc" />
                   <Text style={styles.noDonorsText}>No donors have responded yet</Text>
-                  <Text style={styles.noDonorsSubtext}>Donors will appear here when they respond to this request</Text>
+                  <Text style={styles.noDonorsSubtext}>Share this request to get responses</Text>
+                  <TouchableOpacity style={styles.shareRequestButton} onPress={() => shareRequest(item)}>
+                    <Text style={styles.shareRequestButtonText}>Share Request</Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </View>
 
-            {/* Request Footer */}
-            <View style={styles.requestFooter}>
-              <Text style={styles.timeText}>
-                Created: {item.createdAt?.toDate().toLocaleString() || 'Just now'}
-              </Text>
-              <View style={styles.buttonGroup}>
-                <TouchableOpacity 
-                  style={styles.fulfillButton}
-                  onPress={() => updateRequestStatus(item.id, 'fulfilled')}
-                >
-                  <Text style={styles.buttonText}>✓ Mark Fulfilled</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.cancelButton}
-                  onPress={() => updateRequestStatus(item.id, 'cancelled')}
-                >
-                  <Text style={styles.buttonText}>✗ Cancel</Text>
-                </TouchableOpacity>
-              </View>
+            {/* Action Buttons */}
+            <View style={styles.actionButtons}>
+              {item.status === 'active' && (
+                <>
+                  <TouchableOpacity 
+                    style={styles.fulfillButton}
+                    onPress={() => updateRequestStatus(item.id, 'fulfilled')}
+                  >
+                    <Icon name="check-circle" size={18} color="#fff" />
+                    <Text style={styles.buttonText}>Mark Fulfilled</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.cancelButton}
+                    onPress={() => updateRequestStatus(item.id, 'cancelled')}
+                  >
+                    <Icon name="cancel" size={18} color="#fff" />
+                    <Text style={styles.buttonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+              <TouchableOpacity 
+                style={styles.deleteButton}
+                onPress={() => deleteRequest(item.id)}
+              >
+                <Icon name="delete" size={18} color="#fff" />
+                <Text style={styles.buttonText}>Delete</Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -394,8 +599,15 @@ export default function HospitalDashboard({ navigation }) {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Icon name="inbox" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>No active requests</Text>
+            <Text style={styles.emptyText}>
+              {selectedTab === 'active' ? 'No active requests' : 'No fulfilled requests'}
+            </Text>
             <Text style={styles.emptySubtext}>Tap "New Request" to create one</Text>
+            {selectedTab === 'active' && (
+              <TouchableOpacity style={styles.createButtonLarge} onPress={() => setShowRequestForm(true)}>
+                <Text style={styles.createButtonText}>+ Create New Request</Text>
+              </TouchableOpacity>
+            )}
           </View>
         }
       />
@@ -420,55 +632,99 @@ export default function HospitalDashboard({ navigation }) {
                     style={[styles.bloodGroupOption, formData.bloodGroup === group && styles.bloodGroupSelected]}
                     onPress={() => setFormData({...formData, bloodGroup: group})}
                   >
-                    <Text style={styles.bloodGroupOptionText}>{group}</Text>
+                    <Text style={[styles.bloodGroupOptionText, formData.bloodGroup === group && styles.bloodGroupSelectedText]}>
+                      {group}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
-              <Text style={styles.inputLabel}>Quantity (units)</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.quantity}
-                onChangeText={(text) => setFormData({...formData, quantity: text})}
-                keyboardType="numeric"
-                placeholder="Number of units needed"
-              />
+              <Text style={styles.inputLabel}>Quantity (units) *</Text>
+              <View style={styles.quantityContainer}>
+                {[1, 2, 3, 4, 5].map(num => (
+                  <TouchableOpacity
+                    key={num}
+                    style={[styles.quantityOption, formData.quantity === num.toString() && styles.quantitySelected]}
+                    onPress={() => setFormData({...formData, quantity: num.toString()})}
+                  >
+                    <Text style={[styles.quantityOptionText, formData.quantity === num.toString() && styles.quantitySelectedText]}>
+                      {num}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TextInput
+                  style={styles.quantityInput}
+                  value={formData.quantity}
+                  onChangeText={(text) => setFormData({...formData, quantity: text})}
+                  keyboardType="numeric"
+                  placeholder="Custom"
+                  placeholderTextColor="#999"
+                />
+              </View>
 
               <Text style={styles.inputLabel}>Department</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.department}
-                onChangeText={(text) => setFormData({...formData, department: text})}
-                placeholder="e.g., Emergency, ICU"
-              />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.departmentScroll}>
+                {departments.map(dept => (
+                  <TouchableOpacity
+                    key={dept}
+                    style={[styles.departmentOption, formData.department === dept && styles.departmentSelected]}
+                    onPress={() => setFormData({...formData, department: dept})}
+                  >
+                    <Text style={[styles.departmentOptionText, formData.department === dept && styles.departmentSelectedText]}>
+                      {dept}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
 
-              <Text style={styles.inputLabel}>Urgency Level</Text>
+              <Text style={styles.inputLabel}>Urgency Level *</Text>
               <View style={styles.urgencyContainer}>
                 {urgencyLevels.map(level => (
                   <TouchableOpacity
                     key={level.value}
-                    style={[styles.urgencyOption, { backgroundColor: level.color }]}
+                    style={[styles.urgencyOption, { backgroundColor: level.color }, formData.urgency === level.value && styles.urgencySelected]}
                     onPress={() => setFormData({...formData, urgency: level.value})}
                   >
+                    <Icon name={level.icon} size={20} color="#fff" />
                     <Text style={styles.urgencyOptionText}>{level.label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
-              <Text style={styles.inputLabel}>Patient Name (Optional)</Text>
+              <Text style={styles.inputLabel}>Patient Information (Optional)</Text>
               <TextInput
                 style={styles.input}
                 value={formData.patientName}
                 onChangeText={(text) => setFormData({...formData, patientName: text})}
-                placeholder="Patient name"
+                placeholder="Patient Name"
+                placeholderTextColor="#999"
               />
+              
+              <View style={styles.rowInput}>
+                <TextInput
+                  style={[styles.input, styles.halfInput]}
+                  value={formData.patientAge}
+                  onChangeText={(text) => setFormData({...formData, patientAge: text})}
+                  placeholder="Age"
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                />
+                <TextInput
+                  style={[styles.input, styles.halfInput]}
+                  value={formData.patientGender}
+                  onChangeText={(text) => setFormData({...formData, patientGender: text})}
+                  placeholder="Gender"
+                  placeholderTextColor="#999"
+                />
+              </View>
 
               <Text style={styles.inputLabel}>Additional Notes</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
                 value={formData.notes}
                 onChangeText={(text) => setFormData({...formData, notes: text})}
-                placeholder="Any special requirements..."
+                placeholder="Any special requirements or instructions..."
+                placeholderTextColor="#999"
                 multiline
                 numberOfLines={3}
               />
@@ -488,35 +744,74 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' },
   loadingText: { marginTop: 10, color: '#666' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
+  
+  // Header
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0', elevation: 2 },
   title: { fontSize: 24, fontWeight: 'bold', color: '#d32f2f' },
   subtitle: { fontSize: 14, color: '#666', marginTop: 4 },
   logoutButton: { padding: 8 },
-  statsContainer: { flexDirection: 'row', padding: 15, justifyContent: 'space-around' },
-  statCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, alignItems: 'center', minWidth: 100, elevation: 2 },
+  
+  // Stats
+  statsScrollView: { flexGrow: 0 },
+  statsContainer: { flexDirection: 'row', padding: 15, gap: 12 },
+  statCard: { backgroundColor: '#fff', padding: 15, borderRadius: 12, alignItems: 'center', minWidth: 100, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4 },
   statNumber: { fontSize: 28, fontWeight: 'bold', color: '#d32f2f' },
-  statLabel: { fontSize: 12, color: '#666', marginTop: 5 },
+  statLabel: { fontSize: 12, color: '#666', marginTop: 4 },
+  statSubLabel: { fontSize: 10, color: '#999' },
+  
+  // Location Button
   locationButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#2196f3', marginHorizontal: 15, marginTop: 5, padding: 12, borderRadius: 10, gap: 8 },
   locationButtonText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 15, marginTop: 15, marginBottom: 5 },
+  
+  // Tabs
+  tabContainer: { flexDirection: 'row', marginHorizontal: 15, marginTop: 15, backgroundColor: '#fff', borderRadius: 10, padding: 4 },
+  tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8, flexDirection: 'row', justifyContent: 'center', gap: 6 },
+  activeTab: { backgroundColor: '#d32f2f' },
+  tabText: { fontSize: 14, fontWeight: '500', color: '#666' },
+  activeTabText: { color: '#fff' },
+  tabBadge: { backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 },
+  tabBadgeText: { fontSize: 10, fontWeight: 'bold', color: '#d32f2f' },
+  
+  // Search
+  searchContainer: { paddingHorizontal: 15, paddingVertical: 10 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: '#e0e0e0' },
+  searchInput: { flex: 1, paddingVertical: 12, paddingHorizontal: 8, fontSize: 14 },
+  filterScroll: { flexGrow: 0, marginTop: 10 },
+  filterChip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: '#f0f0f0', marginRight: 8 },
+  activeFilterChip: { backgroundColor: '#d32f2f' },
+  filterChipText: { fontSize: 12, color: '#666' },
+  activeFilterChipText: { color: '#fff' },
+  
+  // Request Card
   requestCard: { backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, elevation: 2 },
   requestHeader: { flexDirection: 'row', marginBottom: 15 },
-  bloodGroupCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  bloodGroupText: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  bloodGroupCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center', marginRight: 12, position: 'relative' },
+  bloodGroupText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  rareStar: { position: 'absolute', top: -5, right: -5, fontSize: 12 },
   requestHeaderInfo: { flex: 1 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 4 },
   departmentText: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  quantityText: { fontSize: 14, color: '#666', marginTop: 2 },
-  urgencyBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start', marginTop: 6 },
+  urgencyBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, gap: 4 },
   urgencyText: { color: '#fff', fontWeight: 'bold', fontSize: 10 },
-  rareBadge: { backgroundColor: '#ff9800', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start', marginTop: 4 },
-  rareText: { color: '#fff', fontWeight: 'bold', fontSize: 10 },
-  patientInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  patientInfoText: { fontSize: 13, color: '#666', marginLeft: 8 },
+  quantityText: { fontSize: 14, color: '#666', marginTop: 2 },
+  dateText: { fontSize: 10, color: '#999', marginTop: 4 },
+  shareButton: { padding: 8 },
+  
+  // Patient Info
+  patientInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', gap: 8 },
+  patientInfoText: { fontSize: 13, color: '#666', flex: 1 },
+  
+  // Notes
+  notesContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', padding: 10, borderRadius: 8, marginBottom: 12, gap: 8 },
+  notesText: { fontSize: 12, color: '#666', flex: 1 },
+  
+  // Donor Section
   donorSection: { marginTop: 5, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
-  donorSectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  donorSectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginLeft: 8 },
+  donorSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap' },
+  donorSectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginLeft: 8, flex: 1 },
+  responseTimeText: { fontSize: 10, color: '#999' },
   donorCard: { backgroundColor: '#f9f9f9', padding: 15, borderRadius: 10, marginBottom: 12, borderLeftWidth: 4, borderLeftColor: '#d32f2f' },
-  donorHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
+  donorHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, flexWrap: 'wrap' },
   donorName: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 4 },
   donorBlood: { fontSize: 13, color: '#d32f2f', fontWeight: '500' },
   donorTimeContainer: { backgroundColor: '#e0e0e0', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
@@ -530,32 +825,67 @@ const styles = StyleSheet.create({
   emailButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   responseStatus: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
   statusText: { fontSize: 11, color: '#ff9800', fontWeight: '500' },
+  
   noDonorsContainer: { alignItems: 'center', padding: 30 },
   noDonorsText: { fontSize: 14, color: '#999', marginTop: 10 },
   noDonorsSubtext: { fontSize: 12, color: '#ccc', marginTop: 5, textAlign: 'center' },
-  requestFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
-  timeText: { fontSize: 10, color: '#999' },
-  buttonGroup: { flexDirection: 'row', gap: 8 },
-  fulfillButton: { backgroundColor: '#4caf50', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 6 },
-  cancelButton: { backgroundColor: '#d32f2f', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 6 },
+  shareRequestButton: { marginTop: 15, backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20 },
+  shareRequestButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  
+  // Action Buttons
+  actionButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#e0e0e0', gap: 10 },
+  fulfillButton: { flex: 1, backgroundColor: '#4caf50', paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
+  cancelButton: { flex: 1, backgroundColor: '#ff9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
+  deleteButton: { flex: 1, backgroundColor: '#d32f2f', paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   buttonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  
+  // Empty State
   emptyContainer: { alignItems: 'center', padding: 50 },
   emptyText: { fontSize: 16, color: '#999', marginTop: 10 },
   emptySubtext: { fontSize: 14, color: '#999', marginTop: 5 },
+  createButtonLarge: { marginTop: 20, backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 25 },
+  createButtonText: { color: '#fff', fontWeight: 'bold' },
+  
+  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' },
   modalContainer: { backgroundColor: '#fff', margin: 20, borderRadius: 20, padding: 20, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#d32f2f' },
-  inputLabel: { fontSize: 14, fontWeight: '600', color: '#333', marginTop: 15, marginBottom: 5 },
+  inputLabel: { fontSize: 14, fontWeight: '600', color: '#333', marginTop: 15, marginBottom: 8 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#fff' },
   textArea: { height: 80, textAlignVertical: 'top' },
+  rowInput: { flexDirection: 'row', gap: 10 },
+  halfInput: { flex: 1 },
+  
+  // Blood Group Grid
   bloodGroupGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10 },
   bloodGroupOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#f0f0f0', margin: 4 },
   bloodGroupSelected: { backgroundColor: '#d32f2f' },
   bloodGroupOptionText: { fontSize: 14, color: '#333' },
+  bloodGroupSelectedText: { color: '#fff' },
+  
+  // Quantity
+  quantityContainer: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 },
+  quantityOption: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
+  quantitySelected: { backgroundColor: '#d32f2f' },
+  quantityOptionText: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  quantitySelectedText: { color: '#fff' },
+  quantityInput: { width: 80, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, textAlign: 'center' },
+  
+  // Department
+  departmentScroll: { flexGrow: 0, marginBottom: 10 },
+  departmentOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#f0f0f0', marginRight: 8 },
+  departmentSelected: { backgroundColor: '#d32f2f' },
+  departmentOptionText: { fontSize: 14, color: '#333' },
+  departmentSelectedText: { color: '#fff' },
+  
+  // Urgency
   urgencyContainer: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  urgencyOption: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
+  urgencyOption: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
+  urgencySelected: { borderWidth: 2, borderColor: '#333' },
   urgencyOptionText: { color: '#fff', fontWeight: 'bold' },
+  
+  // Submit Button
   submitButton: { backgroundColor: '#d32f2f', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 20, marginBottom: 20 },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
 });
