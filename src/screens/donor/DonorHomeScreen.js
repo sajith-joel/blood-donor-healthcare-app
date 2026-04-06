@@ -157,10 +157,12 @@ export default function DonorHomeScreen({ navigation }) {
   };
 
   const respondToRequest = async (request) => {
-    console.log('=== RESPOND BUTTON CLICKED ===');
-    console.log('Request ID:', request.id);
-    console.log('User Data:', userData);
+    // Open hospital location first when donor clicks donate
+    if (request.hospitalLocation) {
+      openMaps(request.hospitalLocation, request.hospitalName);
+    }
 
+    // Check if donor has phone number
     if (!userData?.phone) {
       Alert.alert(
         'Phone Number Required',
@@ -173,11 +175,7 @@ export default function DonorHomeScreen({ navigation }) {
       return;
     }
 
-    // Format hospital location for display
-    const hospitalAddress = request.hospitalLocation ?
-      `📍 Hospital Location: ${request.hospitalLocation.latitude.toFixed(4)}, ${request.hospitalLocation.longitude.toFixed(4)}` :
-      '📍 Hospital Location: Not available';
-
+    // Donor details to send to hospital
     const donorDetails = {
       donorId: user.uid,
       donorName: userData?.name || 'Anonymous Donor',
@@ -189,67 +187,39 @@ export default function DonorHomeScreen({ navigation }) {
       message: `Donor responded to ${request.bloodGroup} blood request`
     };
 
-    console.log('Donor details being sent:', donorDetails);
+    try {
+      const requestRef = doc(db, 'bloodRequests', request.id);
+      const existingResponses = request.donorResponses || [];
 
-    Alert.alert(
-      'Confirm Donation',
-      `🏥 Hospital: ${request.hospitalName}\n` +
-      `🩸 Blood Group: ${request.bloodGroup}\n` +
-      `📊 Quantity: ${request.quantity} unit(s)\n` +
-      `⚠️ Urgency: ${request.urgency.toUpperCase()}\n` +
-      `📍 Distance: ${request.distance ? request.distance.toFixed(1) : 'Unknown'}km\n\n` +
-      `📋 Your Details:\n` +
-      `📝 Name: ${donorDetails.donorName}\n` +
-      `📞 Phone: ${donorDetails.phone}\n` +
-      `📧 Email: ${donorDetails.email}\n\n` +
-      `⚠️ Your details will be shared with the hospital.\n\n` +
-      `Do you want to proceed?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'View Hospital Location',
-          onPress: () => openHospitalLocation(request.hospitalLocation, request.hospitalName)
-        },
-        {
-          text: 'Yes, Donate',
-          onPress: async () => {
-            try {
-              const requestRef = doc(db, 'bloodRequests', request.id);
-              const existingResponses = request.donorResponses || [];
+      // Prevent duplicate response
+      const alreadyResponded = existingResponses.some(
+        (response) => response.donorId === user.uid
+      );
 
-              const alreadyResponded = existingResponses.some(r => r.donorId === user.uid);
-              if (alreadyResponded) {
-                Alert.alert('Already Responded', 'You have already responded to this request.');
-                return;
-              }
+      if (alreadyResponded) {
+        Alert.alert(
+          'Already Responded',
+          'You have already responded to this blood request.'
+        );
+        return;
+      }
 
-              await updateDoc(requestRef, {
-                donorResponses: [...existingResponses, donorDetails],
-                lastResponseAt: Timestamp.now(),
-                totalResponses: (existingResponses.length + 1)
-              });
+      // Save donor response
+      await updateDoc(requestRef, {
+        donorResponses: [...existingResponses, donorDetails],
+        lastResponseAt: Timestamp.now(),
+        totalResponses: existingResponses.length + 1
+      });
 
-              console.log('Donor details successfully saved to Firestore!');
-
-              Alert.alert(
-                '✅ Response Sent!',
-                `Your details have been sent to ${request.hospitalName}.\n\n` +
-                `📍 Hospital Location:\n` +
-                `Latitude: ${request.hospitalLocation?.latitude || 'N/A'}\n` +
-                `Longitude: ${request.hospitalLocation?.longitude || 'N/A'}\n\n` +
-                `The hospital will contact you shortly at:\n` +
-                `📞 ${donorDetails.phone}\n` +
-                `📧 ${donorDetails.email}\n\n` +
-                `Thank you for saving a life! 🩸`
-              );
-            } catch (error) {
-              console.error('Error responding:', error);
-              Alert.alert('Error', 'Failed to send response: ' + error.message);
-            }
-          }
-        }
-      ]
-    );
+      // Success message
+      Alert.alert(
+        '✅ Response Sent',
+        `Your response has been sent to ${request.hospitalName}.\n\nHospital location has been opened in Google Maps.\n\nThank you for saving a life 🩸`
+      );
+    } catch (error) {
+      console.error('Error responding to request:', error);
+      Alert.alert('Error', 'Failed to send response: ' + error.message);
+    }
   };
 
   const getUrgencyColor = (urgency) => {
