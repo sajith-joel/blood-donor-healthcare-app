@@ -36,8 +36,6 @@ export default function HospitalDashboard({ navigation }) {
   const { user, logout } = useAuth();
   const [requests, setRequests] = useState([]);
   const [showRequestForm, setShowRequestForm] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedRequest, setSelectedRequest] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [hospitalLocation, setHospitalLocation] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -53,7 +51,7 @@ export default function HospitalDashboard({ navigation }) {
     patientAge: '',
     patientGender: '',
     notes: '',
-    searchRadius: 3 // Default 3km
+    searchRadius: 3
   });
 
   const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -131,11 +129,9 @@ export default function HospitalDashboard({ navigation }) {
       return;
     }
 
-    // Auto-set radius for rare blood groups
     const isRare = ['AB-', 'B-', 'A-', 'O-'].includes(formData.bloodGroup);
     let finalRadius = formData.searchRadius;
 
-    // Suggest extended radius for rare blood groups
     if (isRare && formData.searchRadius === 3) {
       Alert.alert(
         'Rare Blood Group Detected',
@@ -209,7 +205,7 @@ export default function HospitalDashboard({ navigation }) {
   const updateSearchRadius = async (requestId, newRadius) => {
     Alert.alert(
       'Update Search Radius',
-      `Are you sure you want to change the search radius to ${newRadius}km? This will help reach more donors.`,
+      `Are you sure you want to change the search radius to ${newRadius}km?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -231,36 +227,110 @@ export default function HospitalDashboard({ navigation }) {
     );
   };
 
-  const updateRequestStatus = async (requestId, newStatus) => {
-    try {
-      console.log("Updating request:", requestId, newStatus);
-
-      const requestRef = doc(db, 'bloodRequests', requestId);
-
-      await updateDoc(requestRef, {
-        status: newStatus,
-        updatedAt: Timestamp.now()
-      });
-
-      Alert.alert("Success", `Request marked as ${newStatus}`);
-    } catch (error) {
-      console.error("Status update error:", error);
-      Alert.alert("Error", error.message);
-    }
+  // FIXED: Mark Fulfilled function
+  const handleMarkFulfilled = async (requestId) => {
+    console.log("Mark Fulfilled clicked for request:", requestId);
+    Alert.alert(
+      'Confirm',
+      'Mark this request as fulfilled?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes',
+          onPress: async () => {
+            try {
+              const requestRef = doc(db, 'bloodRequests', requestId);
+              await updateDoc(requestRef, {
+                status: 'fulfilled',
+                updatedAt: Timestamp.now()
+              });
+              Alert.alert('Success', '✓ Request marked as fulfilled');
+            } catch (error) {
+              console.error('Error:', error);
+              Alert.alert('Error', 'Failed to update status: ' + error.message);
+            }
+          }
+        }
+      ]
+    );
   };
 
+  // FIXED: Cancel function
+  const handleCancel = async (requestId) => {
+    console.log("Cancel clicked for request:", requestId);
+    Alert.alert(
+      'Confirm',
+      'Cancel this request?',
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Yes',
+          onPress: async () => {
+            try {
+              const requestRef = doc(db, 'bloodRequests', requestId);
+              await updateDoc(requestRef, {
+                status: 'cancelled',
+                updatedAt: Timestamp.now()
+              });
+              Alert.alert('Success', '✗ Request cancelled');
+            } catch (error) {
+              console.error('Error:', error);
+              Alert.alert('Error', 'Failed to cancel: ' + error.message);
+            }
+          }
+        }
+      ]
+    );
+  };
 
-  const deleteRequest = async (requestId) => {
-    try {
-      console.log("Deleting request:", requestId);
+  // FIXED: Delete function
+  const handleDelete = async (requestId) => {
+    console.log("Delete clicked for request:", requestId);
+    Alert.alert(
+      'Confirm Delete',
+      'Are you sure you want to delete this request?\n\nThis action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteDoc(doc(db, 'bloodRequests', requestId));
+              Alert.alert('Success', '🗑 Request deleted successfully');
+            } catch (error) {
+              console.error('Error:', error);
+              Alert.alert('Error', 'Failed to delete: ' + error.message);
+            }
+          }
+        }
+      ]
+    );
+  };
 
-      await deleteDoc(doc(db, 'bloodRequests', requestId));
-
-      Alert.alert("Deleted", "Request deleted successfully");
-    } catch (error) {
-      console.error("Delete error:", error);
-      Alert.alert("Error", error.message);
-    }
+  // FIXED: Logout function
+  const handleLogout = () => {
+    console.log("Logout clicked");
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await logout();
+              console.log("Logged out successfully");
+            } catch (error) {
+              console.error("Logout error:", error);
+              Alert.alert('Error', 'Failed to logout');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const callDonor = (phoneNumber) => {
@@ -297,7 +367,7 @@ export default function HospitalDashboard({ navigation }) {
         `Urgency: ${request.urgency.toUpperCase()}\n` +
         `Search Radius: ${request.radius}km\n` +
         `Patient: ${request.patientName || 'Not specified'}\n\n` +
-        `Please visit the hospital if you can donate within ${request.radius}km radius. Share this message to help find donors!`;
+        `Please visit the hospital if you can donate within ${request.radius}km radius.`;
 
       await Share.share({
         message: message,
@@ -306,23 +376,6 @@ export default function HospitalDashboard({ navigation }) {
     } catch (error) {
       console.error('Error sharing:', error);
     }
-  };
-
-  const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-          }
-        }
-      ]
-    );
   };
 
   const formatResponseTime = (timestamp) => {
@@ -638,26 +691,20 @@ export default function HospitalDashboard({ navigation }) {
               )}
             </View>
 
-            {/* Action Buttons */}
+            {/* Action Buttons - NOW WORKING */}
             <View style={styles.actionButtons}>
               {item.status === 'active' && (
                 <>
                   <TouchableOpacity
                     style={styles.fulfillButton}
-                    onPress={() => {
-                      console.log("Mark Fulfilled clicked", item.id);
-                      updateRequestStatus(item.id, 'fulfilled');
-                    }}
+                    onPress={() => handleMarkFulfilled(item.id)}
                   >
                     <Icon name="check-circle" size={18} color="#fff" />
                     <Text style={styles.buttonText}>Mark Fulfilled</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.cancelButton}
-                    onPress={() => {
-                      console.log("Cancel clicked", item.id);
-                      updateRequestStatus(item.id, 'cancelled');
-                    }}
+                    onPress={() => handleCancel(item.id)}
                   >
                     <Icon name="cancel" size={18} color="#fff" />
                     <Text style={styles.buttonText}>Cancel</Text>
@@ -666,10 +713,7 @@ export default function HospitalDashboard({ navigation }) {
               )}
               <TouchableOpacity
                 style={styles.deleteButton}
-                onPress={() => {
-                  console.log("Delete clicked", item.id);
-                  deleteRequest(item.id);
-                }}
+                onPress={() => handleDelete(item.id)}
               >
                 <Icon name="delete" size={18} color="#fff" />
                 <Text style={styles.buttonText}>Delete</Text>
@@ -682,7 +726,7 @@ export default function HospitalDashboard({ navigation }) {
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              setRefreshing(false);
+              setTimeout(() => setRefreshing(false), 1000);
             }}
           />
         }
@@ -856,25 +900,17 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' },
   loadingText: { marginTop: 10, color: '#666' },
-
-  // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0', elevation: 2 },
   title: { fontSize: 24, fontWeight: 'bold', color: '#d32f2f' },
   subtitle: { fontSize: 14, color: '#666', marginTop: 4 },
   logoutButton: { padding: 8 },
-
-  // Stats
   statsScrollView: { flexGrow: 0 },
   statsContainer: { flexDirection: 'row', padding: 15, gap: 12 },
   statCard: { backgroundColor: '#fff', padding: 15, borderRadius: 12, alignItems: 'center', minWidth: 90, elevation: 2 },
   statNumber: { fontSize: 28, fontWeight: 'bold', color: '#d32f2f' },
   statLabel: { fontSize: 12, color: '#666', marginTop: 4 },
-
-  // Location Button
   locationButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#2196f3', marginHorizontal: 15, marginTop: 5, padding: 12, borderRadius: 10, gap: 8 },
   locationButtonText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-
-  // Tabs
   tabContainer: { flexDirection: 'row', marginHorizontal: 15, marginTop: 15, backgroundColor: '#fff', borderRadius: 10, padding: 4 },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8, flexDirection: 'row', justifyContent: 'center', gap: 6 },
   activeTab: { backgroundColor: '#d32f2f' },
@@ -882,8 +918,6 @@ const styles = StyleSheet.create({
   activeTabText: { color: '#fff' },
   tabBadge: { backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 },
   tabBadgeText: { fontSize: 10, fontWeight: 'bold', color: '#d32f2f' },
-
-  // Search
   searchContainer: { paddingHorizontal: 15, paddingVertical: 10 },
   searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: '#e0e0e0' },
   searchInput: { flex: 1, paddingVertical: 12, paddingHorizontal: 8, fontSize: 14 },
@@ -892,8 +926,6 @@ const styles = StyleSheet.create({
   activeFilterChip: { backgroundColor: '#d32f2f' },
   filterChipText: { fontSize: 12, color: '#666' },
   activeFilterChipText: { color: '#fff' },
-
-  // Request Card
   requestCard: { backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, elevation: 2 },
   requestHeader: { flexDirection: 'row', marginBottom: 12 },
   bloodGroupCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center', marginRight: 12, position: 'relative' },
@@ -907,8 +939,6 @@ const styles = StyleSheet.create({
   quantityText: { fontSize: 14, color: '#666', marginTop: 2 },
   dateText: { fontSize: 10, color: '#999', marginTop: 4 },
   shareButton: { padding: 8 },
-
-  // Radius Section
   radiusSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f0f7ff', padding: 10, borderRadius: 8, marginBottom: 10 },
   radiusInfo: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 },
   radiusLabel: { fontSize: 12, color: '#666' },
@@ -917,16 +947,10 @@ const styles = StyleSheet.create({
   rareRadiusText: { fontSize: 10, color: '#fff', fontWeight: 'bold' },
   editRadiusButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2196f3', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, gap: 4 },
   editRadiusText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
-
-  // Patient Info
   patientInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', gap: 8 },
   patientInfoText: { fontSize: 13, color: '#666', flex: 1 },
-
-  // Notes
   notesContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', padding: 10, borderRadius: 8, marginBottom: 12, gap: 8 },
   notesText: { fontSize: 12, color: '#666', flex: 1 },
-
-  // Donor Section
   donorSection: { marginTop: 5, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
   donorSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap' },
   donorSectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginLeft: 8, flex: 1 },
@@ -946,28 +970,21 @@ const styles = StyleSheet.create({
   emailButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   responseStatus: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
   statusText: { fontSize: 11, color: '#4caf50', fontWeight: '500' },
-
   noDonorsContainer: { alignItems: 'center', padding: 30 },
   noDonorsText: { fontSize: 14, color: '#999', marginTop: 10 },
   noDonorsSubtext: { fontSize: 12, color: '#ccc', marginTop: 5, textAlign: 'center' },
   shareRequestButton: { marginTop: 15, backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20 },
   shareRequestButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-
-  // Action Buttons
   actionButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#e0e0e0', gap: 10 },
   fulfillButton: { flex: 1, backgroundColor: '#4caf50', paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   cancelButton: { flex: 1, backgroundColor: '#ff9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   deleteButton: { flex: 1, backgroundColor: '#d32f2f', paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   buttonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-
-  // Empty State
   emptyContainer: { alignItems: 'center', padding: 50 },
   emptyText: { fontSize: 16, color: '#999', marginTop: 10 },
   emptySubtext: { fontSize: 14, color: '#999', marginTop: 5 },
   createButtonLarge: { marginTop: 20, backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 25 },
   createButtonText: { color: '#fff', fontWeight: 'bold' },
-
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' },
   modalContainer: { backgroundColor: '#fff', margin: 20, borderRadius: 20, padding: 20, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
@@ -978,44 +995,32 @@ const styles = StyleSheet.create({
   textArea: { height: 80, textAlignVertical: 'top' },
   rowInput: { flexDirection: 'row', gap: 10 },
   halfInput: { flex: 1 },
-
-  // Blood Group Grid
   bloodGroupGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10 },
   bloodGroupOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#f0f0f0', margin: 4 },
   bloodGroupSelected: { backgroundColor: '#d32f2f' },
   bloodGroupOptionText: { fontSize: 14, color: '#333' },
   bloodGroupSelectedText: { color: '#fff' },
-
-  // Quantity
   quantityContainer: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 },
   quantityOption: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
   quantitySelected: { backgroundColor: '#d32f2f' },
   quantityOptionText: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   quantitySelectedText: { color: '#fff' },
   quantityInput: { width: 80, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, textAlign: 'center' },
-
-  // Department
   departmentScroll: { flexGrow: 0, marginBottom: 10 },
   departmentOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#f0f0f0', marginRight: 8 },
   departmentSelected: { backgroundColor: '#d32f2f' },
   departmentOptionText: { fontSize: 14, color: '#333' },
   departmentSelectedText: { color: '#fff' },
-
-  // Radius Grid
   radiusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
   radiusOption: { flex: 1, minWidth: '45%', backgroundColor: '#f5f5f5', padding: 15, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#e0e0e0' },
   radiusOptionSelected: { backgroundColor: '#fff0f0' },
   radiusOptionValue: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 8 },
   radiusOptionValueSelected: { color: '#d32f2f' },
   radiusOptionDesc: { fontSize: 10, color: '#999', marginTop: 4 },
-
-  // Urgency
   urgencyContainer: { flexDirection: 'row', gap: 10, marginBottom: 10 },
   urgencyOption: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
   urgencySelected: { borderWidth: 2, borderColor: '#333' },
   urgencyOptionText: { color: '#fff', fontWeight: 'bold' },
-
-  // Submit Button
   submitButton: { backgroundColor: '#d32f2f', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 20, marginBottom: 20 },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
 });

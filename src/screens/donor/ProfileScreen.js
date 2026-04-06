@@ -6,17 +6,16 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Image
+  ActivityIndicator
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/firebaseConfig';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import InputField from '../../components/common/InputField';
 import Button from '../../components/common/Button';
-import Loader from '../../components/common/Loader';
-import * as ImagePicker from 'expo-image-picker';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 
-export default function ProfileScreen() {
+export default function ProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
   const [userData, setUserData] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -67,7 +66,8 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleLogout = async () => {
+  // SIMPLE WORKING LOGOUT FUNCTION
+  const handleLogout = () => {
     Alert.alert(
       'Logout',
       'Are you sure you want to logout?',
@@ -77,11 +77,10 @@ export default function ProfileScreen() {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            const result = await logout();
-            if (result.success) {
-              // Navigation will be handled by AuthContext
-              Alert.alert('Success', 'Logged out successfully');
-            } else {
+            try {
+              await logout();
+              // No need to navigate - AuthContext will handle it
+            } catch (error) {
               Alert.alert('Error', 'Failed to logout');
             }
           }
@@ -89,49 +88,39 @@ export default function ProfileScreen() {
       ]
     );
   };
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      // Upload image to Firebase Storage
-      Alert.alert('Success', 'Profile picture updated');
-    }
-  };
 
   if (loading) {
-    return <Loader visible={true} />;
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#d32f2f" />
+        <Text style={styles.loadingText}>Loading profile...</Text>
+      </View>
+    );
   }
 
   return (
     <ScrollView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={pickImage}>
-          <View style={styles.avatarContainer}>
-            <Image
-              source={require('../../../assets/logo.png')}
-              style={styles.avatar}
-              defaultSource={require('../../../assets/icon.png')}
-            />
-            <View style={styles.editIcon}>
-              <Text style={styles.editIconText}>📷</Text>
-            </View>
+        <View style={styles.avatarContainer}>
+          <View style={styles.avatarPlaceholder}>
+            <Text style={styles.avatarText}>
+              {userData?.name ? userData.name.charAt(0).toUpperCase() : '👤'}
+            </Text>
           </View>
-        </TouchableOpacity>
+        </View>
         <Text style={styles.userName}>{userData?.name || 'User'}</Text>
         <Text style={styles.userEmail}>{user?.email}</Text>
+        <Text style={styles.userRole}>🩸 Donor</Text>
       </View>
 
+      {/* Personal Information */}
       <View style={styles.infoContainer}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Personal Information</Text>
           {!editing && (
             <TouchableOpacity onPress={() => setEditing(true)}>
-              <Text style={styles.editButton}>Edit</Text>
+              <Icon name="edit" size={20} color="#d32f2f" />
             </TouchableOpacity>
           )}
         </View>
@@ -185,24 +174,29 @@ export default function ProfileScreen() {
         ) : (
           <>
             <View style={styles.infoRow}>
+              <Icon name="person" size={18} color="#666" />
               <Text style={styles.infoLabel}>Full Name:</Text>
               <Text style={styles.infoValue}>{userData?.name || 'Not set'}</Text>
             </View>
             <View style={styles.infoRow}>
+              <Icon name="phone" size={18} color="#666" />
               <Text style={styles.infoLabel}>Phone Number:</Text>
               <Text style={styles.infoValue}>{userData?.phone || 'Not set'}</Text>
             </View>
             {userData?.bloodGroup && (
               <View style={styles.infoRow}>
+                <Icon name="water-drop" size={18} color="#d32f2f" />
                 <Text style={styles.infoLabel}>Blood Group:</Text>
                 <Text style={styles.infoValue}>{userData.bloodGroup}</Text>
               </View>
             )}
             <View style={styles.infoRow}>
+              <Icon name="location-on" size={18} color="#666" />
               <Text style={styles.infoLabel}>Address:</Text>
               <Text style={styles.infoValue}>{userData?.address || 'Not set'}</Text>
             </View>
             <View style={styles.infoRow}>
+              <Icon name="calendar-today" size={18} color="#666" />
               <Text style={styles.infoLabel}>Member Since:</Text>
               <Text style={styles.infoValue}>
                 {userData?.createdAt ? new Date(userData.createdAt).toLocaleDateString() : 'N/A'}
@@ -212,12 +206,11 @@ export default function ProfileScreen() {
         )}
       </View>
 
-      <Button
-        title="Logout"
-        variant="outline"
-        onPress={handleLogout}
-        style={styles.logoutButton}
-      />
+      {/* Logout Button */}
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <Icon name="logout" size={24} color="#fff" />
+        <Text style={styles.logoutButtonText}>Logout</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -227,6 +220,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#666',
+  },
   header: {
     backgroundColor: '#d32f2f',
     padding: 30,
@@ -235,26 +239,21 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 20,
   },
   avatarContainer: {
-    position: 'relative',
     marginBottom: 15,
   },
-  avatar: {
+  avatarPlaceholder: {
     width: 100,
     height: 100,
     borderRadius: 50,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
     borderWidth: 3,
     borderColor: '#fff',
   },
-  editIcon: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    borderRadius: 15,
-    padding: 5,
-  },
-  editIconText: {
-    fontSize: 12,
+  avatarText: {
+    fontSize: 48,
+    color: '#d32f2f',
   },
   userName: {
     fontSize: 22,
@@ -267,16 +266,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     opacity: 0.9,
   },
+  userRole: {
+    fontSize: 12,
+    color: '#fff',
+    opacity: 0.7,
+    marginTop: 5,
+  },
   infoContainer: {
     backgroundColor: '#fff',
     margin: 20,
     padding: 20,
-    borderRadius: 10,
+    borderRadius: 12,
     elevation: 2,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowRadius: 4,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -289,22 +294,19 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
   },
-  editButton: {
-    color: '#d32f2f',
-    fontSize: 14,
-    fontWeight: '600',
-  },
   infoRow: {
     flexDirection: 'row',
-    paddingVertical: 10,
+    alignItems: 'center',
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
   infoLabel: {
-    width: 120,
+    width: 100,
     fontSize: 14,
     color: '#666',
     fontWeight: '500',
+    marginLeft: 12,
   },
   infoValue: {
     flex: 1,
@@ -324,7 +326,19 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#d32f2f',
     marginHorizontal: 20,
     marginBottom: 30,
+    padding: 15,
+    borderRadius: 10,
+    gap: 10,
+  },
+  logoutButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

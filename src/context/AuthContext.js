@@ -39,7 +39,6 @@ export const AuthProvider = ({ children }) => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       
-      // Save user data
       await setDoc(doc(db, 'users', userCredential.user.uid), {
         ...userData,
         uid: userCredential.user.uid,
@@ -48,7 +47,6 @@ export const AuthProvider = ({ children }) => {
         isActive: true
       });
       
-      // If donor, create donor document
       if (userData.userType === 'donor') {
         await setDoc(doc(db, 'donors', userCredential.user.uid), {
           uid: userCredential.user.uid,
@@ -60,7 +58,6 @@ export const AuthProvider = ({ children }) => {
         });
       }
       
-      // If hospital, create hospital document
       if (userData.userType === 'hospital') {
         await setDoc(doc(db, 'hospitals', userCredential.user.uid), {
           uid: userCredential.user.uid,
@@ -86,7 +83,6 @@ export const AuthProvider = ({ children }) => {
       const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
       
       if (userDoc.exists()) {
-        // Update last login
         await updateDoc(doc(db, 'users', userCredential.user.uid), {
           lastLogin: new Date().toISOString()
         });
@@ -101,7 +97,6 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      // Update user status before logout
       if (user) {
         await updateDoc(doc(db, 'users', user.uid), {
           isActive: false,
