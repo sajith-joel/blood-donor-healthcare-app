@@ -12,11 +12,11 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/firebaseConfig';
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
+import {
+  collection,
+  query,
+  where,
+  orderBy,
   onSnapshot,
   Timestamp,
   doc,
@@ -37,7 +37,7 @@ export default function DonorHomeScreen({ navigation }) {
 
   useEffect(() => {
     initializeDonor();
-    
+
     return () => {
       if (unsubscribeRequests) {
         unsubscribeRequests();
@@ -58,7 +58,7 @@ export default function DonorHomeScreen({ navigation }) {
         setUserData(userDoc.data());
         console.log('User data loaded:', userDoc.data());
       }
-      
+
       const location = await getCurrentLocation();
       setUserLocation(location);
     } catch (error) {
@@ -80,26 +80,26 @@ export default function DonorHomeScreen({ navigation }) {
 
     unsubscribeRequests = onSnapshot(q, async (snapshot) => {
       console.log(`Found ${snapshot.size} active requests`);
-      
+
       const requestsList = [];
       const location = await getCurrentLocation().catch(() => null);
-      
+
       for (const docSnapshot of snapshot.docs) {
         const request = docSnapshot.data();
         const requestId = docSnapshot.id;
-        
+
         let isCompatible = false;
         if (userData?.bloodGroup) {
           isCompatible = checkCompatibility(userData.bloodGroup, request.bloodGroup);
         } else {
           isCompatible = true;
         }
-        
+
         if (!isCompatible) continue;
-        
+
         let distance = null;
         let isWithinRadius = true;
-        
+
         if (location && request.hospitalLocation) {
           distance = calculateDistance(
             location.latitude,
@@ -109,7 +109,7 @@ export default function DonorHomeScreen({ navigation }) {
           );
           isWithinRadius = distance <= request.radius;
         }
-        
+
         if (isWithinRadius) {
           requestsList.push({
             id: requestId,
@@ -118,7 +118,7 @@ export default function DonorHomeScreen({ navigation }) {
           });
         }
       }
-      
+
       requestsList.sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
       setRequests(requestsList);
       setLoading(false);
@@ -148,7 +148,7 @@ export default function DonorHomeScreen({ navigation }) {
       Alert.alert('Location Not Available', 'Hospital location is not available.');
       return;
     }
-    
+
     const url = `https://www.google.com/maps/search/?api=1&query=${hospitalLocation.latitude},${hospitalLocation.longitude}`;
     Linking.openURL(url).catch(err => {
       console.error('Error opening maps:', err);
@@ -160,7 +160,7 @@ export default function DonorHomeScreen({ navigation }) {
     console.log('=== RESPOND BUTTON CLICKED ===');
     console.log('Request ID:', request.id);
     console.log('User Data:', userData);
-    
+
     if (!userData?.phone) {
       Alert.alert(
         'Phone Number Required',
@@ -174,8 +174,8 @@ export default function DonorHomeScreen({ navigation }) {
     }
 
     // Format hospital location for display
-    const hospitalAddress = request.hospitalLocation ? 
-      `📍 Hospital Location: ${request.hospitalLocation.latitude.toFixed(4)}, ${request.hospitalLocation.longitude.toFixed(4)}` : 
+    const hospitalAddress = request.hospitalLocation ?
+      `📍 Hospital Location: ${request.hospitalLocation.latitude.toFixed(4)}, ${request.hospitalLocation.longitude.toFixed(4)}` :
       '📍 Hospital Location: Not available';
 
     const donorDetails = {
@@ -188,9 +188,9 @@ export default function DonorHomeScreen({ navigation }) {
       status: 'pending',
       message: `Donor responded to ${request.bloodGroup} blood request`
     };
-    
+
     console.log('Donor details being sent:', donorDetails);
-    
+
     Alert.alert(
       'Confirm Donation',
       `🏥 Hospital: ${request.hospitalName}\n` +
@@ -216,21 +216,21 @@ export default function DonorHomeScreen({ navigation }) {
             try {
               const requestRef = doc(db, 'bloodRequests', request.id);
               const existingResponses = request.donorResponses || [];
-              
+
               const alreadyResponded = existingResponses.some(r => r.donorId === user.uid);
               if (alreadyResponded) {
                 Alert.alert('Already Responded', 'You have already responded to this request.');
                 return;
               }
-              
+
               await updateDoc(requestRef, {
                 donorResponses: [...existingResponses, donorDetails],
                 lastResponseAt: Timestamp.now(),
                 totalResponses: (existingResponses.length + 1)
               });
-              
+
               console.log('Donor details successfully saved to Firestore!');
-              
+
               Alert.alert(
                 '✅ Response Sent!',
                 `Your details have been sent to ${request.hospitalName}.\n\n` +
@@ -279,7 +279,7 @@ export default function DonorHomeScreen({ navigation }) {
     const date = timestamp.toDate();
     const now = new Date();
     const diff = Math.floor((now - date) / 60000);
-    
+
     if (diff < 1) return 'Just now';
     if (diff < 60) return `${diff} minutes ago`;
     if (diff < 1440) return `${Math.floor(diff / 60)} hours ago`;
@@ -310,7 +310,7 @@ export default function DonorHomeScreen({ navigation }) {
       <View style={styles.header}>
         <Text style={styles.title}>🩸 Blood Requests Near You</Text>
         <Text style={styles.subtitle}>
-          {userData?.bloodGroup 
+          {userData?.bloodGroup
             ? `Showing compatible requests for ${userData.bloodGroup} blood type`
             : 'Please update your blood group in profile'}
         </Text>
@@ -376,7 +376,7 @@ export default function DonorHomeScreen({ navigation }) {
 
             {/* Location Button */}
             {item.hospitalLocation && item.hospitalLocation.latitude && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.locationButton}
                 onPress={() => openMaps(item.hospitalLocation, item.hospitalName)}
               >
@@ -399,9 +399,12 @@ export default function DonorHomeScreen({ navigation }) {
               </Text>
             </View>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.respondButton, { backgroundColor: getUrgencyColor(item.urgency) }]}
-              onPress={() => respondToRequest(item)}
+              onPress={() => {
+                openMaps(item.hospitalLocation, item.hospitalName);
+                respondToRequest(item);
+              }}
             >
               <Icon name="favorite" size={20} color="#fff" />
               <Text style={styles.respondButtonText}>I Can Donate</Text>
@@ -409,8 +412,8 @@ export default function DonorHomeScreen({ navigation }) {
           </View>
         )}
         refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
+          <RefreshControl
+            refreshing={refreshing}
             onRefresh={async () => {
               setRefreshing(true);
               await setupRealTimeListener();
@@ -423,11 +426,11 @@ export default function DonorHomeScreen({ navigation }) {
             <Icon name="inbox" size={64} color="#ccc" />
             <Text style={styles.emptyText}>No blood requests found</Text>
             <Text style={styles.emptySubtext}>
-              {userData?.bloodGroup 
+              {userData?.bloodGroup
                 ? `No active ${userData.bloodGroup} blood requests within your area`
                 : 'Please update your blood group in profile to see relevant requests'}
             </Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.refreshButton}
               onPress={() => setupRealTimeListener()}
             >
@@ -444,10 +447,10 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-            Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
 
