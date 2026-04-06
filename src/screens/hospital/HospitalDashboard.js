@@ -15,12 +15,12 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/firebaseConfig';
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  where, 
-  updateDoc, 
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  updateDoc,
   doc,
   orderBy,
   Timestamp,
@@ -71,9 +71,9 @@ export default function HospitalDashboard({ navigation }) {
 
   const subscribeToRequests = () => {
     if (!user?.uid) return;
-    
+
     console.log('Setting up real-time listener for hospital:', user.uid);
-    
+
     const q = query(
       collection(db, 'bloodRequests'),
       where('hospitalId', '==', user.uid),
@@ -138,7 +138,7 @@ export default function HospitalDashboard({ navigation }) {
       };
 
       await addDoc(collection(db, 'bloodRequests'), requestData);
-      
+
       Alert.alert('Success', `Blood request created! Searching within ${radius}km`);
       setShowRequestForm(false);
       setFormData({
@@ -172,6 +172,8 @@ export default function HospitalDashboard({ navigation }) {
   };
 
   const handleLogout = () => {
+    console.log("Logout button clicked");
+
     Alert.alert(
       'Logout',
       'Are you sure you want to logout?',
@@ -181,6 +183,7 @@ export default function HospitalDashboard({ navigation }) {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
+            console.log("Confirmed logout");
             await logout();
           }
         }
@@ -276,7 +279,7 @@ export default function HospitalDashboard({ navigation }) {
                   Donor Responses ({item.donorResponses?.length || 0})
                 </Text>
               </View>
-              
+
               {item.donorResponses && item.donorResponses.length > 0 ? (
                 <View>
                   {item.donorResponses.map((donor, idx) => (
@@ -292,13 +295,13 @@ export default function HospitalDashboard({ navigation }) {
                           </Text>
                         </View>
                       </View>
-                      
+
                       <View style={styles.donorContactInfo}>
                         <View style={styles.contactRow}>
                           <Icon name="call" size={16} color="#4caf50" />
                           <Text style={styles.contactText}>📞 {donor.phone || 'No phone number'}</Text>
                           {donor.phone && donor.phone !== 'Not provided' && (
-                            <TouchableOpacity 
+                            <TouchableOpacity
                               style={styles.callButton}
                               onPress={() => callDonor(donor.phone)}
                             >
@@ -306,12 +309,12 @@ export default function HospitalDashboard({ navigation }) {
                             </TouchableOpacity>
                           )}
                         </View>
-                        
+
                         <View style={styles.contactRow}>
                           <Icon name="email" size={16} color="#2196f3" />
                           <Text style={styles.contactText}>📧 {donor.email || 'No email'}</Text>
                           {donor.email && donor.email !== 'Not provided' && (
-                            <TouchableOpacity 
+                            <TouchableOpacity
                               style={styles.emailButton}
                               onPress={() => emailDonor(donor.email)}
                             >
@@ -320,7 +323,7 @@ export default function HospitalDashboard({ navigation }) {
                           )}
                         </View>
                       </View>
-                      
+
                       <View style={styles.responseStatus}>
                         <Text style={styles.statusText}>Status: Pending Contact</Text>
                       </View>
@@ -342,13 +345,13 @@ export default function HospitalDashboard({ navigation }) {
                 Created: {item.createdAt?.toDate().toLocaleString() || 'Just now'}
               </Text>
               <View style={styles.buttonGroup}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.fulfillButton}
                   onPress={() => updateRequestStatus(item.id, 'fulfilled')}
                 >
                   <Text style={styles.buttonText}>✓ Mark Fulfilled</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.cancelButton}
                   onPress={() => updateRequestStatus(item.id, 'cancelled')}
                 >
@@ -359,13 +362,13 @@ export default function HospitalDashboard({ navigation }) {
           </View>
         )}
         refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
+          <RefreshControl
+            refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
               subscribeToRequests();
               setTimeout(() => setRefreshing(false), 1000);
-            }} 
+            }}
           />
         }
         ListEmptyComponent={
@@ -395,7 +398,7 @@ export default function HospitalDashboard({ navigation }) {
                   <TouchableOpacity
                     key={group}
                     style={[styles.bloodGroupOption, formData.bloodGroup === group && styles.bloodGroupSelected]}
-                    onPress={() => setFormData({...formData, bloodGroup: group})}
+                    onPress={() => setFormData({ ...formData, bloodGroup: group })}
                   >
                     <Text style={styles.bloodGroupOptionText}>{group}</Text>
                   </TouchableOpacity>
@@ -406,7 +409,7 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={styles.input}
                 value={formData.quantity}
-                onChangeText={(text) => setFormData({...formData, quantity: text})}
+                onChangeText={(text) => setFormData({ ...formData, quantity: text })}
                 keyboardType="numeric"
                 placeholder="Number of units needed"
               />
@@ -415,7 +418,7 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={styles.input}
                 value={formData.department}
-                onChangeText={(text) => setFormData({...formData, department: text})}
+                onChangeText={(text) => setFormData({ ...formData, department: text })}
                 placeholder="e.g., Emergency, ICU"
               />
 
@@ -425,7 +428,7 @@ export default function HospitalDashboard({ navigation }) {
                   <TouchableOpacity
                     key={level.value}
                     style={[styles.urgencyOption, { backgroundColor: level.color }]}
-                    onPress={() => setFormData({...formData, urgency: level.value})}
+                    onPress={() => setFormData({ ...formData, urgency: level.value })}
                   >
                     <Text style={styles.urgencyOptionText}>{level.label}</Text>
                   </TouchableOpacity>
@@ -436,7 +439,7 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={styles.input}
                 value={formData.patientName}
-                onChangeText={(text) => setFormData({...formData, patientName: text})}
+                onChangeText={(text) => setFormData({ ...formData, patientName: text })}
                 placeholder="Patient name"
               />
 
@@ -444,7 +447,7 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={[styles.input, styles.textArea]}
                 value={formData.notes}
-                onChangeText={(text) => setFormData({...formData, notes: text})}
+                onChangeText={(text) => setFormData({ ...formData, notes: text })}
                 placeholder="Any special requirements..."
                 multiline
                 numberOfLines={3}
