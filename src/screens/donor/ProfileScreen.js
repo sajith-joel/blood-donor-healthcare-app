@@ -185,7 +185,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
             {userData?.bloodGroup && (
               <View style={styles.infoRow}>
-                <Icon name="water-drop" size={18} color="#d32f2f" />
+                <Icon name="opacity" size={20} color="#d32f2f" />
                 <Text style={styles.infoLabel}>Blood Group:</Text>
                 <Text style={styles.infoValue}>{userData.bloodGroup}</Text>
               </View>
