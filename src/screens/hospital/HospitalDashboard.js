@@ -172,8 +172,6 @@ export default function HospitalDashboard({ navigation }) {
   };
 
   const handleLogout = () => {
-    console.log("Logout button clicked");
-
     Alert.alert(
       'Logout',
       'Are you sure you want to logout?',
@@ -183,8 +181,13 @@ export default function HospitalDashboard({ navigation }) {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            console.log("Confirmed logout");
-            await logout();
+            const result = await logout();
+
+            if (result.success) {
+              navigation.replace('Login');
+            } else {
+              Alert.alert('Error', result.error);
+            }
           }
         }
       ]
