@@ -17,12 +17,12 @@ import {
 
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/firebaseConfig';
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  where, 
-  updateDoc, 
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  updateDoc,
   doc,
   orderBy,
   Timestamp,
@@ -71,10 +71,16 @@ export default function HospitalDashboard({ navigation }) {
   ];
 
   useEffect(() => {
+    let unsubscribe;
+
     if (user?.uid) {
       loadHospitalLocation();
-      subscribeToRequests();
+      unsubscribe = subscribeToRequests();
     }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [user?.uid]);
 
   const loadHospitalLocation = async () => {
@@ -88,14 +94,14 @@ export default function HospitalDashboard({ navigation }) {
 
   const subscribeToRequests = () => {
     if (!user?.uid) return;
-    
+
     const q = query(
       collection(db, 'bloodRequests'),
       where('hospitalId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
 
-    return onSnapshot(q, 
+    return onSnapshot(q,
       (snapshot) => {
         const requestsList = [];
         snapshot.forEach((doc) => {
@@ -128,7 +134,7 @@ export default function HospitalDashboard({ navigation }) {
     // Auto-set radius for rare blood groups
     const isRare = ['AB-', 'B-', 'A-', 'O-'].includes(formData.bloodGroup);
     let finalRadius = formData.searchRadius;
-    
+
     // Suggest extended radius for rare blood groups
     if (isRare && formData.searchRadius === 3) {
       Alert.alert(
@@ -142,13 +148,13 @@ export default function HospitalDashboard({ navigation }) {
       );
       return;
     }
-    
+
     createRequest(finalRadius);
   };
 
   const createRequest = async (radius) => {
     const isRare = ['AB-', 'B-', 'A-', 'O-'].includes(formData.bloodGroup);
-    
+
     setLoading(true);
 
     try {
@@ -178,7 +184,7 @@ export default function HospitalDashboard({ navigation }) {
       };
 
       await addDoc(collection(db, 'bloodRequests'), requestData);
-      
+
       Alert.alert('Success', `Blood request created! Searching within ${radius}km radius`);
       setShowRequestForm(false);
       setFormData({
@@ -226,50 +232,35 @@ export default function HospitalDashboard({ navigation }) {
   };
 
   const updateRequestStatus = async (requestId, newStatus) => {
-    Alert.alert(
-      'Confirm Status Change',
-      `Are you sure you want to mark this request as ${newStatus}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm',
-          onPress: async () => {
-            try {
-              const requestRef = doc(db, 'bloodRequests', requestId);
-              await updateDoc(requestRef, {
-                status: newStatus,
-                updatedAt: Timestamp.now()
-              });
-              Alert.alert('Success', `Request marked as ${newStatus}`);
-            } catch (error) {
-              Alert.alert('Error', 'Failed to update request');
-            }
-          }
-        }
-      ]
-    );
+    try {
+      console.log("Updating request:", requestId, newStatus);
+
+      const requestRef = doc(db, 'bloodRequests', requestId);
+
+      await updateDoc(requestRef, {
+        status: newStatus,
+        updatedAt: Timestamp.now()
+      });
+
+      Alert.alert("Success", `Request marked as ${newStatus}`);
+    } catch (error) {
+      console.error("Status update error:", error);
+      Alert.alert("Error", error.message);
+    }
   };
 
+
   const deleteRequest = async (requestId) => {
-    Alert.alert(
-      'Delete Request',
-      'Are you sure you want to delete this request? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteDoc(doc(db, 'bloodRequests', requestId));
-              Alert.alert('Success', 'Request deleted successfully');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to delete request');
-            }
-          }
-        }
-      ]
-    );
+    try {
+      console.log("Deleting request:", requestId);
+
+      await deleteDoc(doc(db, 'bloodRequests', requestId));
+
+      Alert.alert("Deleted", "Request deleted successfully");
+    } catch (error) {
+      console.error("Delete error:", error);
+      Alert.alert("Error", error.message);
+    }
   };
 
   const callDonor = (phoneNumber) => {
@@ -307,7 +298,7 @@ export default function HospitalDashboard({ navigation }) {
         `Search Radius: ${request.radius}km\n` +
         `Patient: ${request.patientName || 'Not specified'}\n\n` +
         `Please visit the hospital if you can donate within ${request.radius}km radius. Share this message to help find donors!`;
-      
+
       await Share.share({
         message: message,
         title: 'Blood Request - Please Help'
@@ -339,7 +330,7 @@ export default function HospitalDashboard({ navigation }) {
     const date = timestamp.toDate();
     const now = new Date();
     const diff = Math.floor((now - date) / 60000);
-    
+
     if (diff < 1) return 'Just now';
     if (diff < 60) return `${diff} minutes ago`;
     if (diff < 1440) return `${Math.floor(diff / 60)} hours ago`;
@@ -348,25 +339,25 @@ export default function HospitalDashboard({ navigation }) {
 
   const getFilteredRequests = () => {
     let filtered = [...requests];
-    
+
     if (selectedTab === 'active') {
       filtered = filtered.filter(r => r.status === 'active');
     } else if (selectedTab === 'fulfilled') {
       filtered = filtered.filter(r => r.status === 'fulfilled');
     }
-    
+
     if (searchQuery) {
-      filtered = filtered.filter(r => 
+      filtered = filtered.filter(r =>
         r.bloodGroup?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         r.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         r.patientName?.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
-    
+
     if (filterBloodGroup) {
       filtered = filtered.filter(r => r.bloodGroup === filterBloodGroup);
     }
-    
+
     return filtered;
   };
 
@@ -376,7 +367,7 @@ export default function HospitalDashboard({ navigation }) {
     const totalResponses = requests.reduce((sum, r) => sum + (r.donorResponses?.length || 0), 0);
     const emergencyRequests = requests.filter(r => r.urgency === 'emergency' && r.status === 'active').length;
     const rareRequests = requests.filter(r => r.isRare && r.status === 'active').length;
-    
+
     return { active, fulfilled, totalResponses, emergencyRequests, rareRequests };
   };
 
@@ -412,22 +403,22 @@ export default function HospitalDashboard({ navigation }) {
             <Icon name="add-circle" size={32} color="#d32f2f" />
             <Text style={styles.statLabel}>New Request</Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.statCard} onPress={() => setSelectedTab('active')}>
             <Text style={styles.statNumber}>{stats.active}</Text>
             <Text style={styles.statLabel}>Active</Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.statCard} onPress={() => setSelectedTab('fulfilled')}>
             <Text style={styles.statNumber}>{stats.fulfilled}</Text>
             <Text style={styles.statLabel}>Fulfilled</Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.totalResponses}</Text>
             <Text style={styles.statLabel}>Responses</Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={[styles.statCard, { backgroundColor: '#ff9800' }]}>
             <Text style={[styles.statNumber, { color: '#fff' }]}>{stats.emergencyRequests}</Text>
             <Text style={[styles.statLabel, { color: '#fff' }]}>Emergency</Text>
@@ -448,14 +439,14 @@ export default function HospitalDashboard({ navigation }) {
 
       {/* Tabs */}
       <View style={styles.tabContainer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.tab, selectedTab === 'active' && styles.activeTab]}
           onPress={() => setSelectedTab('active')}
         >
           <Text style={[styles.tabText, selectedTab === 'active' && styles.activeTabText]}>Active Requests</Text>
           {stats.active > 0 && <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{stats.active}</Text></View>}
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.tab, selectedTab === 'fulfilled' && styles.activeTab]}
           onPress={() => setSelectedTab('fulfilled')}
         >
@@ -480,16 +471,16 @@ export default function HospitalDashboard({ navigation }) {
             </TouchableOpacity>
           ) : null}
         </View>
-        
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.filterChip, !filterBloodGroup && styles.activeFilterChip]}
             onPress={() => setFilterBloodGroup(null)}
           >
             <Text style={[styles.filterChipText, !filterBloodGroup && styles.activeFilterChipText]}>All</Text>
           </TouchableOpacity>
           {bloodGroups.map(group => (
-            <TouchableOpacity 
+            <TouchableOpacity
               key={group}
               style={[styles.filterChip, filterBloodGroup === group && styles.activeFilterChip]}
               onPress={() => setFilterBloodGroup(filterBloodGroup === group ? null : group)}
@@ -541,7 +532,7 @@ export default function HospitalDashboard({ navigation }) {
                 )}
               </View>
               {item.status === 'active' && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.editRadiusButton}
                   onPress={() => updateSearchRadius(item.id, item.radius === 3 ? 5 : item.radius === 5 ? 10 : 15)}
                 >
@@ -584,7 +575,7 @@ export default function HospitalDashboard({ navigation }) {
                   </Text>
                 )}
               </View>
-              
+
               {item.donorResponses && item.donorResponses.length > 0 ? (
                 <View>
                   {item.donorResponses.map((donor, idx) => (
@@ -600,13 +591,13 @@ export default function HospitalDashboard({ navigation }) {
                           </Text>
                         </View>
                       </View>
-                      
+
                       <View style={styles.donorContactInfo}>
                         <View style={styles.contactRow}>
                           <Icon name="call" size={16} color="#4caf50" />
                           <Text style={styles.contactText}>📞 {donor.phone || 'No phone number'}</Text>
                           {donor.phone && donor.phone !== 'Not provided' && (
-                            <TouchableOpacity 
+                            <TouchableOpacity
                               style={styles.callButton}
                               onPress={() => callDonor(donor.phone)}
                             >
@@ -614,12 +605,12 @@ export default function HospitalDashboard({ navigation }) {
                             </TouchableOpacity>
                           )}
                         </View>
-                        
+
                         <View style={styles.contactRow}>
                           <Icon name="email" size={16} color="#2196f3" />
                           <Text style={styles.contactText}>📧 {donor.email || 'No email'}</Text>
                           {donor.email && donor.email !== 'Not provided' && (
-                            <TouchableOpacity 
+                            <TouchableOpacity
                               style={styles.emailButton}
                               onPress={() => emailDonor(donor.email)}
                             >
@@ -628,7 +619,7 @@ export default function HospitalDashboard({ navigation }) {
                           )}
                         </View>
                       </View>
-                      
+
                       <View style={styles.responseStatus}>
                         <Text style={styles.statusText}>✅ Status: Ready to donate</Text>
                       </View>
@@ -651,25 +642,34 @@ export default function HospitalDashboard({ navigation }) {
             <View style={styles.actionButtons}>
               {item.status === 'active' && (
                 <>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.fulfillButton}
-                    onPress={() => updateRequestStatus(item.id, 'fulfilled')}
+                    onPress={() => {
+                      console.log("Mark Fulfilled clicked", item.id);
+                      updateRequestStatus(item.id, 'fulfilled');
+                    }}
                   >
                     <Icon name="check-circle" size={18} color="#fff" />
                     <Text style={styles.buttonText}>Mark Fulfilled</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.cancelButton}
-                    onPress={() => updateRequestStatus(item.id, 'cancelled')}
+                    onPress={() => {
+                      console.log("Cancel clicked", item.id);
+                      updateRequestStatus(item.id, 'cancelled');
+                    }}
                   >
                     <Icon name="cancel" size={18} color="#fff" />
                     <Text style={styles.buttonText}>Cancel</Text>
                   </TouchableOpacity>
                 </>
               )}
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.deleteButton}
-                onPress={() => deleteRequest(item.id)}
+                onPress={() => {
+                  console.log("Delete clicked", item.id);
+                  deleteRequest(item.id);
+                }}
               >
                 <Icon name="delete" size={18} color="#fff" />
                 <Text style={styles.buttonText}>Delete</Text>
@@ -678,12 +678,12 @@ export default function HospitalDashboard({ navigation }) {
           </View>
         )}
         refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
+          <RefreshControl
+            refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
               setRefreshing(false);
-            }} 
+            }}
           />
         }
         ListEmptyComponent={
@@ -720,7 +720,7 @@ export default function HospitalDashboard({ navigation }) {
                   <TouchableOpacity
                     key={group}
                     style={[styles.bloodGroupOption, formData.bloodGroup === group && styles.bloodGroupSelected]}
-                    onPress={() => setFormData({...formData, bloodGroup: group})}
+                    onPress={() => setFormData({ ...formData, bloodGroup: group })}
                   >
                     <Text style={[styles.bloodGroupOptionText, formData.bloodGroup === group && styles.bloodGroupSelectedText]}>
                       {group}
@@ -735,7 +735,7 @@ export default function HospitalDashboard({ navigation }) {
                   <TouchableOpacity
                     key={num}
                     style={[styles.quantityOption, formData.quantity === num.toString() && styles.quantitySelected]}
-                    onPress={() => setFormData({...formData, quantity: num.toString()})}
+                    onPress={() => setFormData({ ...formData, quantity: num.toString() })}
                   >
                     <Text style={[styles.quantityOptionText, formData.quantity === num.toString() && styles.quantitySelectedText]}>
                       {num}
@@ -745,7 +745,7 @@ export default function HospitalDashboard({ navigation }) {
                 <TextInput
                   style={styles.quantityInput}
                   value={formData.quantity}
-                  onChangeText={(text) => setFormData({...formData, quantity: text})}
+                  onChangeText={(text) => setFormData({ ...formData, quantity: text })}
                   keyboardType="numeric"
                   placeholder="Custom"
                   placeholderTextColor="#999"
@@ -758,7 +758,7 @@ export default function HospitalDashboard({ navigation }) {
                   <TouchableOpacity
                     key={dept}
                     style={[styles.departmentOption, formData.department === dept && styles.departmentSelected]}
-                    onPress={() => setFormData({...formData, department: dept})}
+                    onPress={() => setFormData({ ...formData, department: dept })}
                   >
                     <Text style={[styles.departmentOptionText, formData.department === dept && styles.departmentSelectedText]}>
                       {dept}
@@ -778,7 +778,7 @@ export default function HospitalDashboard({ navigation }) {
                       formData.searchRadius === option.value && styles.radiusOptionSelected,
                       formData.searchRadius === option.value && { borderColor: '#d32f2f', borderWidth: 2 }
                     ]}
-                    onPress={() => setFormData({...formData, searchRadius: option.value})}
+                    onPress={() => setFormData({ ...formData, searchRadius: option.value })}
                   >
                     <Icon name={option.icon} size={24} color={formData.searchRadius === option.value ? '#d32f2f' : '#666'} />
                     <Text style={[styles.radiusOptionValue, formData.searchRadius === option.value && styles.radiusOptionValueSelected]}>
@@ -795,7 +795,7 @@ export default function HospitalDashboard({ navigation }) {
                   <TouchableOpacity
                     key={level.value}
                     style={[styles.urgencyOption, { backgroundColor: level.color }, formData.urgency === level.value && styles.urgencySelected]}
-                    onPress={() => setFormData({...formData, urgency: level.value})}
+                    onPress={() => setFormData({ ...formData, urgency: level.value })}
                   >
                     <Icon name={level.icon} size={20} color="#fff" />
                     <Text style={styles.urgencyOptionText}>{level.label}</Text>
@@ -807,16 +807,16 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={styles.input}
                 value={formData.patientName}
-                onChangeText={(text) => setFormData({...formData, patientName: text})}
+                onChangeText={(text) => setFormData({ ...formData, patientName: text })}
                 placeholder="Patient Name"
                 placeholderTextColor="#999"
               />
-              
+
               <View style={styles.rowInput}>
                 <TextInput
                   style={[styles.input, styles.halfInput]}
                   value={formData.patientAge}
-                  onChangeText={(text) => setFormData({...formData, patientAge: text})}
+                  onChangeText={(text) => setFormData({ ...formData, patientAge: text })}
                   placeholder="Age"
                   placeholderTextColor="#999"
                   keyboardType="numeric"
@@ -824,7 +824,7 @@ export default function HospitalDashboard({ navigation }) {
                 <TextInput
                   style={[styles.input, styles.halfInput]}
                   value={formData.patientGender}
-                  onChangeText={(text) => setFormData({...formData, patientGender: text})}
+                  onChangeText={(text) => setFormData({ ...formData, patientGender: text })}
                   placeholder="Gender"
                   placeholderTextColor="#999"
                 />
@@ -834,7 +834,7 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={[styles.input, styles.textArea]}
                 value={formData.notes}
-                onChangeText={(text) => setFormData({...formData, notes: text})}
+                onChangeText={(text) => setFormData({ ...formData, notes: text })}
                 placeholder="Any special requirements or instructions..."
                 placeholderTextColor="#999"
                 multiline
@@ -856,24 +856,24 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' },
   loadingText: { marginTop: 10, color: '#666' },
-  
+
   // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0', elevation: 2 },
   title: { fontSize: 24, fontWeight: 'bold', color: '#d32f2f' },
   subtitle: { fontSize: 14, color: '#666', marginTop: 4 },
   logoutButton: { padding: 8 },
-  
+
   // Stats
   statsScrollView: { flexGrow: 0 },
   statsContainer: { flexDirection: 'row', padding: 15, gap: 12 },
   statCard: { backgroundColor: '#fff', padding: 15, borderRadius: 12, alignItems: 'center', minWidth: 90, elevation: 2 },
   statNumber: { fontSize: 28, fontWeight: 'bold', color: '#d32f2f' },
   statLabel: { fontSize: 12, color: '#666', marginTop: 4 },
-  
+
   // Location Button
   locationButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#2196f3', marginHorizontal: 15, marginTop: 5, padding: 12, borderRadius: 10, gap: 8 },
   locationButtonText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  
+
   // Tabs
   tabContainer: { flexDirection: 'row', marginHorizontal: 15, marginTop: 15, backgroundColor: '#fff', borderRadius: 10, padding: 4 },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8, flexDirection: 'row', justifyContent: 'center', gap: 6 },
@@ -882,7 +882,7 @@ const styles = StyleSheet.create({
   activeTabText: { color: '#fff' },
   tabBadge: { backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 },
   tabBadgeText: { fontSize: 10, fontWeight: 'bold', color: '#d32f2f' },
-  
+
   // Search
   searchContainer: { paddingHorizontal: 15, paddingVertical: 10 },
   searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: '#e0e0e0' },
@@ -892,7 +892,7 @@ const styles = StyleSheet.create({
   activeFilterChip: { backgroundColor: '#d32f2f' },
   filterChipText: { fontSize: 12, color: '#666' },
   activeFilterChipText: { color: '#fff' },
-  
+
   // Request Card
   requestCard: { backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, elevation: 2 },
   requestHeader: { flexDirection: 'row', marginBottom: 12 },
@@ -907,7 +907,7 @@ const styles = StyleSheet.create({
   quantityText: { fontSize: 14, color: '#666', marginTop: 2 },
   dateText: { fontSize: 10, color: '#999', marginTop: 4 },
   shareButton: { padding: 8 },
-  
+
   // Radius Section
   radiusSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f0f7ff', padding: 10, borderRadius: 8, marginBottom: 10 },
   radiusInfo: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 },
@@ -917,15 +917,15 @@ const styles = StyleSheet.create({
   rareRadiusText: { fontSize: 10, color: '#fff', fontWeight: 'bold' },
   editRadiusButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2196f3', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, gap: 4 },
   editRadiusText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
-  
+
   // Patient Info
   patientInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', gap: 8 },
   patientInfoText: { fontSize: 13, color: '#666', flex: 1 },
-  
+
   // Notes
   notesContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', padding: 10, borderRadius: 8, marginBottom: 12, gap: 8 },
   notesText: { fontSize: 12, color: '#666', flex: 1 },
-  
+
   // Donor Section
   donorSection: { marginTop: 5, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
   donorSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap' },
@@ -946,27 +946,27 @@ const styles = StyleSheet.create({
   emailButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   responseStatus: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
   statusText: { fontSize: 11, color: '#4caf50', fontWeight: '500' },
-  
+
   noDonorsContainer: { alignItems: 'center', padding: 30 },
   noDonorsText: { fontSize: 14, color: '#999', marginTop: 10 },
   noDonorsSubtext: { fontSize: 12, color: '#ccc', marginTop: 5, textAlign: 'center' },
   shareRequestButton: { marginTop: 15, backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20 },
   shareRequestButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  
+
   // Action Buttons
   actionButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#e0e0e0', gap: 10 },
   fulfillButton: { flex: 1, backgroundColor: '#4caf50', paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   cancelButton: { flex: 1, backgroundColor: '#ff9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   deleteButton: { flex: 1, backgroundColor: '#d32f2f', paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
   buttonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  
+
   // Empty State
   emptyContainer: { alignItems: 'center', padding: 50 },
   emptyText: { fontSize: 16, color: '#999', marginTop: 10 },
   emptySubtext: { fontSize: 14, color: '#999', marginTop: 5 },
   createButtonLarge: { marginTop: 20, backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 25 },
   createButtonText: { color: '#fff', fontWeight: 'bold' },
-  
+
   // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' },
   modalContainer: { backgroundColor: '#fff', margin: 20, borderRadius: 20, padding: 20, maxHeight: '90%' },
@@ -978,14 +978,14 @@ const styles = StyleSheet.create({
   textArea: { height: 80, textAlignVertical: 'top' },
   rowInput: { flexDirection: 'row', gap: 10 },
   halfInput: { flex: 1 },
-  
+
   // Blood Group Grid
   bloodGroupGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10 },
   bloodGroupOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#f0f0f0', margin: 4 },
   bloodGroupSelected: { backgroundColor: '#d32f2f' },
   bloodGroupOptionText: { fontSize: 14, color: '#333' },
   bloodGroupSelectedText: { color: '#fff' },
-  
+
   // Quantity
   quantityContainer: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 },
   quantityOption: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
@@ -993,14 +993,14 @@ const styles = StyleSheet.create({
   quantityOptionText: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   quantitySelectedText: { color: '#fff' },
   quantityInput: { width: 80, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, textAlign: 'center' },
-  
+
   // Department
   departmentScroll: { flexGrow: 0, marginBottom: 10 },
   departmentOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#f0f0f0', marginRight: 8 },
   departmentSelected: { backgroundColor: '#d32f2f' },
   departmentOptionText: { fontSize: 14, color: '#333' },
   departmentSelectedText: { color: '#fff' },
-  
+
   // Radius Grid
   radiusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
   radiusOption: { flex: 1, minWidth: '45%', backgroundColor: '#f5f5f5', padding: 15, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#e0e0e0' },
@@ -1008,13 +1008,13 @@ const styles = StyleSheet.create({
   radiusOptionValue: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 8 },
   radiusOptionValueSelected: { color: '#d32f2f' },
   radiusOptionDesc: { fontSize: 10, color: '#999', marginTop: 4 },
-  
+
   // Urgency
   urgencyContainer: { flexDirection: 'row', gap: 10, marginBottom: 10 },
   urgencyOption: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
   urgencySelected: { borderWidth: 2, borderColor: '#333' },
   urgencyOptionText: { color: '#fff', fontWeight: 'bold' },
-  
+
   // Submit Button
   submitButton: { backgroundColor: '#d32f2f', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 20, marginBottom: 20 },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
