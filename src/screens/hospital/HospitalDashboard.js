@@ -15,12 +15,12 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/firebaseConfig';
-import {
-  collection,
-  addDoc,
-  query,
-  where,
-  updateDoc,
+import { 
+  collection, 
+  addDoc, 
+  query, 
+  where, 
+  updateDoc, 
   doc,
   orderBy,
   Timestamp,
@@ -71,9 +71,9 @@ export default function HospitalDashboard({ navigation }) {
 
   const subscribeToRequests = () => {
     if (!user?.uid) return;
-
+    
     console.log('Setting up real-time listener for hospital:', user.uid);
-
+    
     const q = query(
       collection(db, 'bloodRequests'),
       where('hospitalId', '==', user.uid),
@@ -85,9 +85,6 @@ export default function HospitalDashboard({ navigation }) {
       snapshot.forEach((doc) => {
         const data = doc.data();
         console.log(`Request ${doc.id}: Blood=${data.bloodGroup}, Status=${data.status}, Responses=${data.donorResponses?.length || 0}`);
-        if (data.donorResponses && data.donorResponses.length > 0) {
-          console.log('Donor responses:', JSON.stringify(data.donorResponses));
-        }
         requestsList.push({ id: doc.id, ...data });
       });
       setRequests(requestsList);
@@ -138,7 +135,7 @@ export default function HospitalDashboard({ navigation }) {
       };
 
       await addDoc(collection(db, 'bloodRequests'), requestData);
-
+      
       Alert.alert('Success', `Blood request created! Searching within ${radius}km`);
       setShowRequestForm(false);
       setFormData({
@@ -181,13 +178,7 @@ export default function HospitalDashboard({ navigation }) {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            const result = await logout();
-
-            if (result.success) {
-              navigation.replace('Login');
-            } else {
-              Alert.alert('Error', result.error);
-            }
+            await logout();
           }
         }
       ]
@@ -210,6 +201,15 @@ export default function HospitalDashboard({ navigation }) {
     }
   };
 
+  const openHospitalLocationOnMap = () => {
+    if (hospitalLocation) {
+      const url = `https://www.google.com/maps/search/?api=1&query=${hospitalLocation.latitude},${hospitalLocation.longitude}`;
+      Linking.openURL(url);
+    } else {
+      Alert.alert('Location Not Available', 'Hospital location not available.');
+    }
+  };
+
   const activeRequests = requests.filter(r => r.status === 'active');
   const fulfilledRequests = requests.filter(r => r.status === 'fulfilled');
 
@@ -224,6 +224,7 @@ export default function HospitalDashboard({ navigation }) {
 
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>🏥 Hospital Dashboard</Text>
@@ -234,6 +235,7 @@ export default function HospitalDashboard({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      {/* Stats Cards */}
       <View style={styles.statsContainer}>
         <TouchableOpacity style={styles.statCard} onPress={() => setShowRequestForm(true)}>
           <Icon name="add-circle" size={40} color="#d32f2f" />
@@ -249,7 +251,14 @@ export default function HospitalDashboard({ navigation }) {
         </View>
       </View>
 
-      <Text style={styles.sectionTitle}>Active Requests</Text>
+      {/* Location Button */}
+      <TouchableOpacity style={styles.locationButton} onPress={openHospitalLocationOnMap}>
+        <Icon name="my-location" size={20} color="#fff" />
+        <Text style={styles.locationButtonText}>View My Hospital Location</Text>
+      </TouchableOpacity>
+
+      {/* Active Requests List */}
+      <Text style={styles.sectionTitle}>Active Blood Requests</Text>
       <FlatList
         data={activeRequests}
         keyExtractor={(item) => item.id}
@@ -274,7 +283,15 @@ export default function HospitalDashboard({ navigation }) {
               </View>
             </View>
 
-            {/* Donor Responses Section - THIS IS WHERE DONOR DETAILS APPEAR */}
+            {/* Patient Info */}
+            {item.patientName && (
+              <View style={styles.patientInfo}>
+                <Icon name="person" size={16} color="#666" />
+                <Text style={styles.patientInfoText}>Patient: {item.patientName}</Text>
+              </View>
+            )}
+
+            {/* Donor Responses Section */}
             <View style={styles.donorSection}>
               <View style={styles.donorSectionHeader}>
                 <Icon name="people" size={20} color="#d32f2f" />
@@ -282,7 +299,7 @@ export default function HospitalDashboard({ navigation }) {
                   Donor Responses ({item.donorResponses?.length || 0})
                 </Text>
               </View>
-
+              
               {item.donorResponses && item.donorResponses.length > 0 ? (
                 <View>
                   {item.donorResponses.map((donor, idx) => (
@@ -294,17 +311,17 @@ export default function HospitalDashboard({ navigation }) {
                         </View>
                         <View style={styles.donorTimeContainer}>
                           <Text style={styles.donorTime}>
-                            {donor.respondedAt?.toDate().toLocaleTimeString() || 'Just now'}
+                            {donor.respondedAt?.toDate().toLocaleString() || 'Just now'}
                           </Text>
                         </View>
                       </View>
-
+                      
                       <View style={styles.donorContactInfo}>
                         <View style={styles.contactRow}>
                           <Icon name="call" size={16} color="#4caf50" />
                           <Text style={styles.contactText}>📞 {donor.phone || 'No phone number'}</Text>
                           {donor.phone && donor.phone !== 'Not provided' && (
-                            <TouchableOpacity
+                            <TouchableOpacity 
                               style={styles.callButton}
                               onPress={() => callDonor(donor.phone)}
                             >
@@ -312,21 +329,21 @@ export default function HospitalDashboard({ navigation }) {
                             </TouchableOpacity>
                           )}
                         </View>
-
+                        
                         <View style={styles.contactRow}>
                           <Icon name="email" size={16} color="#2196f3" />
                           <Text style={styles.contactText}>📧 {donor.email || 'No email'}</Text>
                           {donor.email && donor.email !== 'Not provided' && (
-                            <TouchableOpacity
+                            <TouchableOpacity 
                               style={styles.emailButton}
                               onPress={() => emailDonor(donor.email)}
                             >
-                              <Text style={styles.emailButtonText}>Email</Text>
+                              <Text style={styles.emailButtonText}>Send Email</Text>
                             </TouchableOpacity>
                           )}
                         </View>
                       </View>
-
+                      
                       <View style={styles.responseStatus}>
                         <Text style={styles.statusText}>Status: Pending Contact</Text>
                       </View>
@@ -348,13 +365,13 @@ export default function HospitalDashboard({ navigation }) {
                 Created: {item.createdAt?.toDate().toLocaleString() || 'Just now'}
               </Text>
               <View style={styles.buttonGroup}>
-                <TouchableOpacity
+                <TouchableOpacity 
                   style={styles.fulfillButton}
                   onPress={() => updateRequestStatus(item.id, 'fulfilled')}
                 >
                   <Text style={styles.buttonText}>✓ Mark Fulfilled</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
+                <TouchableOpacity 
                   style={styles.cancelButton}
                   onPress={() => updateRequestStatus(item.id, 'cancelled')}
                 >
@@ -365,13 +382,13 @@ export default function HospitalDashboard({ navigation }) {
           </View>
         )}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
+          <RefreshControl 
+            refreshing={refreshing} 
             onRefresh={() => {
               setRefreshing(true);
               subscribeToRequests();
               setTimeout(() => setRefreshing(false), 1000);
-            }}
+            }} 
           />
         }
         ListEmptyComponent={
@@ -401,7 +418,7 @@ export default function HospitalDashboard({ navigation }) {
                   <TouchableOpacity
                     key={group}
                     style={[styles.bloodGroupOption, formData.bloodGroup === group && styles.bloodGroupSelected]}
-                    onPress={() => setFormData({ ...formData, bloodGroup: group })}
+                    onPress={() => setFormData({...formData, bloodGroup: group})}
                   >
                     <Text style={styles.bloodGroupOptionText}>{group}</Text>
                   </TouchableOpacity>
@@ -412,7 +429,7 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={styles.input}
                 value={formData.quantity}
-                onChangeText={(text) => setFormData({ ...formData, quantity: text })}
+                onChangeText={(text) => setFormData({...formData, quantity: text})}
                 keyboardType="numeric"
                 placeholder="Number of units needed"
               />
@@ -421,7 +438,7 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={styles.input}
                 value={formData.department}
-                onChangeText={(text) => setFormData({ ...formData, department: text })}
+                onChangeText={(text) => setFormData({...formData, department: text})}
                 placeholder="e.g., Emergency, ICU"
               />
 
@@ -431,7 +448,7 @@ export default function HospitalDashboard({ navigation }) {
                   <TouchableOpacity
                     key={level.value}
                     style={[styles.urgencyOption, { backgroundColor: level.color }]}
-                    onPress={() => setFormData({ ...formData, urgency: level.value })}
+                    onPress={() => setFormData({...formData, urgency: level.value})}
                   >
                     <Text style={styles.urgencyOptionText}>{level.label}</Text>
                   </TouchableOpacity>
@@ -442,7 +459,7 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={styles.input}
                 value={formData.patientName}
-                onChangeText={(text) => setFormData({ ...formData, patientName: text })}
+                onChangeText={(text) => setFormData({...formData, patientName: text})}
                 placeholder="Patient name"
               />
 
@@ -450,7 +467,7 @@ export default function HospitalDashboard({ navigation }) {
               <TextInput
                 style={[styles.input, styles.textArea]}
                 value={formData.notes}
-                onChangeText={(text) => setFormData({ ...formData, notes: text })}
+                onChangeText={(text) => setFormData({...formData, notes: text})}
                 placeholder="Any special requirements..."
                 multiline
                 numberOfLines={3}
@@ -479,7 +496,9 @@ const styles = StyleSheet.create({
   statCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, alignItems: 'center', minWidth: 100, elevation: 2 },
   statNumber: { fontSize: 28, fontWeight: 'bold', color: '#d32f2f' },
   statLabel: { fontSize: 12, color: '#666', marginTop: 5 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 15, marginTop: 10, marginBottom: 5 },
+  locationButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#2196f3', marginHorizontal: 15, marginTop: 5, padding: 12, borderRadius: 10, gap: 8 },
+  locationButtonText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 15, marginTop: 15, marginBottom: 5 },
   requestCard: { backgroundColor: '#fff', margin: 15, marginTop: 8, padding: 15, borderRadius: 12, elevation: 2 },
   requestHeader: { flexDirection: 'row', marginBottom: 15 },
   bloodGroupCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#d32f2f', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
@@ -491,9 +510,11 @@ const styles = StyleSheet.create({
   urgencyText: { color: '#fff', fontWeight: 'bold', fontSize: 10 },
   rareBadge: { backgroundColor: '#ff9800', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start', marginTop: 4 },
   rareText: { color: '#fff', fontWeight: 'bold', fontSize: 10 },
-  donorSection: { marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
+  patientInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  patientInfoText: { fontSize: 13, color: '#666', marginLeft: 8 },
+  donorSection: { marginTop: 5, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
   donorSectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  donorSectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginLeft: 8 },
+  donorSectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginLeft: 8 },
   donorCard: { backgroundColor: '#f9f9f9', padding: 15, borderRadius: 10, marginBottom: 12, borderLeftWidth: 4, borderLeftColor: '#d32f2f' },
   donorHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   donorName: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 4 },
@@ -503,16 +524,16 @@ const styles = StyleSheet.create({
   donorContactInfo: { marginBottom: 10 },
   contactRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' },
   contactText: { fontSize: 13, color: '#666', marginLeft: 8, flex: 1 },
-  callButton: { backgroundColor: '#4caf50', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 15, marginLeft: 8 },
+  callButton: { backgroundColor: '#4caf50', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 15, marginLeft: 8 },
   callButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
-  emailButton: { backgroundColor: '#2196f3', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 15, marginLeft: 8 },
+  emailButton: { backgroundColor: '#2196f3', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 15, marginLeft: 8 },
   emailButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   responseStatus: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
   statusText: { fontSize: 11, color: '#ff9800', fontWeight: '500' },
   noDonorsContainer: { alignItems: 'center', padding: 30 },
   noDonorsText: { fontSize: 14, color: '#999', marginTop: 10 },
   noDonorsSubtext: { fontSize: 12, color: '#ccc', marginTop: 5, textAlign: 'center' },
-  requestFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
+  requestFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#e0e0e0' },
   timeText: { fontSize: 10, color: '#999' },
   buttonGroup: { flexDirection: 'row', gap: 8 },
   fulfillButton: { backgroundColor: '#4caf50', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 6 },
