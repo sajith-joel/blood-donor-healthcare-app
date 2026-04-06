@@ -7,7 +7,8 @@ import {
   RefreshControl,
   TouchableOpacity,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Linking
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/firebaseConfig';
@@ -51,17 +52,13 @@ export default function DonorHomeScreen({ navigation }) {
 
   const loadUserData = async () => {
     try {
-      // Get user data from users collection
       const userDocRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userDocRef);
       if (userDoc.exists()) {
         setUserData(userDoc.data());
         console.log('User data loaded:', userDoc.data());
-      } else {
-        console.log('No user document found');
       }
       
-      // Get current location
       const location = await getCurrentLocation();
       setUserLocation(location);
     } catch (error) {
@@ -91,7 +88,6 @@ export default function DonorHomeScreen({ navigation }) {
         const request = docSnapshot.data();
         const requestId = docSnapshot.id;
         
-        // Check if blood group is compatible
         let isCompatible = false;
         if (userData?.bloodGroup) {
           isCompatible = checkCompatibility(userData.bloodGroup, request.bloodGroup);
@@ -101,7 +97,6 @@ export default function DonorHomeScreen({ navigation }) {
         
         if (!isCompatible) continue;
         
-        // Calculate distance if location available
         let distance = null;
         let isWithinRadius = true;
         
@@ -147,6 +142,20 @@ export default function DonorHomeScreen({ navigation }) {
     return compatibility[donorBlood]?.includes(recipientBlood) || false;
   };
 
+  // Function to open Google Maps with hospital location
+  const openHospitalLocation = (hospitalLocation, hospitalName) => {
+    if (!hospitalLocation || !hospitalLocation.latitude || !hospitalLocation.longitude) {
+      Alert.alert('Location Not Available', 'Hospital location is not available.');
+      return;
+    }
+    
+    const url = `https://www.google.com/maps/search/?api=1&query=${hospitalLocation.latitude},${hospitalLocation.longitude}`;
+    Linking.openURL(url).catch(err => {
+      console.error('Error opening maps:', err);
+      Alert.alert('Error', 'Could not open maps app.');
+    });
+  };
+
   const respondToRequest = async (request) => {
     console.log('=== RESPOND BUTTON CLICKED ===');
     console.log('Request ID:', request.id);
@@ -164,7 +173,11 @@ export default function DonorHomeScreen({ navigation }) {
       return;
     }
 
-    // Create donor details object with all necessary fields
+    // Format hospital location for display
+    const hospitalAddress = request.hospitalLocation ? 
+      `📍 Hospital Location: ${request.hospitalLocation.latitude.toFixed(4)}, ${request.hospitalLocation.longitude.toFixed(4)}` : 
+      '📍 Hospital Location: Not available';
+
     const donorDetails = {
       donorId: user.uid,
       donorName: userData?.name || 'Anonymous Donor',
@@ -176,37 +189,40 @@ export default function DonorHomeScreen({ navigation }) {
       message: `Donor responded to ${request.bloodGroup} blood request`
     };
     
-    console.log('Donor details being sent to Firestore:', donorDetails);
+    console.log('Donor details being sent:', donorDetails);
     
     Alert.alert(
       'Confirm Donation',
-      `You are about to respond to a blood request:\n\n` +
       `🏥 Hospital: ${request.hospitalName}\n` +
       `🩸 Blood Group: ${request.bloodGroup}\n` +
-      `📍 Distance: ${request.distance ? request.distance.toFixed(1) : 'Unknown'}km\n` +
-      `⚠️ Urgency: ${request.urgency.toUpperCase()}\n\n` +
-      `Your details will be shared with the hospital:\n` +
+      `📊 Quantity: ${request.quantity} unit(s)\n` +
+      `⚠️ Urgency: ${request.urgency.toUpperCase()}\n` +
+      `📍 Distance: ${request.distance ? request.distance.toFixed(1) : 'Unknown'}km\n\n` +
+      `📋 Your Details:\n` +
       `📝 Name: ${donorDetails.donorName}\n` +
       `📞 Phone: ${donorDetails.phone}\n` +
       `📧 Email: ${donorDetails.email}\n\n` +
+      `⚠️ Your details will be shared with the hospital.\n\n` +
       `Do you want to proceed?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Yes, Share My Details',
+          text: 'View Hospital Location',
+          onPress: () => openHospitalLocation(request.hospitalLocation, request.hospitalName)
+        },
+        {
+          text: 'Yes, Donate',
           onPress: async () => {
             try {
               const requestRef = doc(db, 'bloodRequests', request.id);
               const existingResponses = request.donorResponses || [];
               
-              // Check if already responded
               const alreadyResponded = existingResponses.some(r => r.donorId === user.uid);
               if (alreadyResponded) {
                 Alert.alert('Already Responded', 'You have already responded to this request.');
                 return;
               }
               
-              // Update the request with donor details
               await updateDoc(requestRef, {
                 donorResponses: [...existingResponses, donorDetails],
                 lastResponseAt: Timestamp.now(),
@@ -218,6 +234,9 @@ export default function DonorHomeScreen({ navigation }) {
               Alert.alert(
                 '✅ Response Sent!',
                 `Your details have been sent to ${request.hospitalName}.\n\n` +
+                `📍 Hospital Location:\n` +
+                `Latitude: ${request.hospitalLocation?.latitude || 'N/A'}\n` +
+                `Longitude: ${request.hospitalLocation?.longitude || 'N/A'}\n\n` +
                 `The hospital will contact you shortly at:\n` +
                 `📞 ${donorDetails.phone}\n` +
                 `📧 ${donorDetails.email}\n\n` +
@@ -265,6 +284,16 @@ export default function DonorHomeScreen({ navigation }) {
     if (diff < 60) return `${diff} minutes ago`;
     if (diff < 1440) return `${Math.floor(diff / 60)} hours ago`;
     return `${Math.floor(diff / 1440)} days ago`;
+  };
+
+  // Function to open maps from the request card
+  const openMaps = (hospitalLocation, hospitalName) => {
+    if (hospitalLocation && hospitalLocation.latitude && hospitalLocation.longitude) {
+      const url = `https://www.google.com/maps/search/?api=1&query=${hospitalLocation.latitude},${hospitalLocation.longitude}`;
+      Linking.openURL(url);
+    } else {
+      Alert.alert('Location Not Available', 'Hospital location not available for this request.');
+    }
   };
 
   if (loading) {
@@ -344,6 +373,17 @@ export default function DonorHomeScreen({ navigation }) {
                 <Text style={styles.detailText}>Search radius: {item.radius}km</Text>
               </View>
             </View>
+
+            {/* Location Button */}
+            {item.hospitalLocation && item.hospitalLocation.latitude && (
+              <TouchableOpacity 
+                style={styles.locationButton}
+                onPress={() => openMaps(item.hospitalLocation, item.hospitalName)}
+              >
+                <Icon name="map" size={18} color="#fff" />
+                <Text style={styles.locationButtonText}>View Hospital Location on Map</Text>
+              </TouchableOpacity>
+            )}
 
             {item.notes && (
               <View style={styles.notesContainer}>
@@ -442,6 +482,8 @@ const styles = StyleSheet.create({
   detailsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   detailItem: { flexDirection: 'row', alignItems: 'center' },
   detailText: { fontSize: 12, color: '#666', marginLeft: 4 },
+  locationButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#2196f3', padding: 10, borderRadius: 8, marginBottom: 12, gap: 8 },
+  locationButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
   notesContainer: { backgroundColor: '#f5f5f5', padding: 10, borderRadius: 8, marginBottom: 12 },
   notesLabel: { fontSize: 11, fontWeight: 'bold', color: '#666', marginBottom: 4 },
   notesText: { fontSize: 12, color: '#666' },
