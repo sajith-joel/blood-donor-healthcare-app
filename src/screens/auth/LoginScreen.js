@@ -7,17 +7,20 @@ import {
   Platform,
   TouchableOpacity,
   Alert,
-  ScrollView
+  ScrollView,
+  Switch
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import InputField from '../../components/common/InputField';
 import Button from '../../components/common/Button';
 import Loader from '../../components/common/Loader';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const { login } = useAuth();
 
   const handleLogin = async () => {
@@ -27,7 +30,7 @@ export default function LoginScreen({ navigation }) {
     }
 
     setLoading(true);
-    const result = await login(email, password);
+    const result = await login(email, password, rememberMe);
     setLoading(false);
 
     if (!result.success) {
@@ -43,7 +46,7 @@ export default function LoginScreen({ navigation }) {
       <Loader visible={loading} />
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>Blood Donor App</Text>
+          <Text style={styles.title}>🩸 Blood Donor App</Text>
           <Text style={styles.subtitle}>Login to your account</Text>
         </View>
 
@@ -66,6 +69,22 @@ export default function LoginScreen({ navigation }) {
             required
           />
 
+          {/* Remember Me Switch */}
+          <View style={styles.rememberContainer}>
+            <View style={styles.rememberRow}>
+              <Switch
+                value={rememberMe}
+                onValueChange={setRememberMe}
+                trackColor={{ false: '#767577', true: '#d32f2f' }}
+                thumbColor={rememberMe ? '#fff' : '#f4f3f4'}
+              />
+              <Text style={styles.rememberText}>Remember Me</Text>
+            </View>
+            <TouchableOpacity>
+              <Text style={styles.forgotText}>Forgot Password?</Text>
+            </TouchableOpacity>
+          </View>
+
           <Button title="Login" onPress={handleLogin} style={styles.loginButton} />
 
           <TouchableOpacity
@@ -76,6 +95,13 @@ export default function LoginScreen({ navigation }) {
               Don't have an account? <Text style={styles.registerLinkText}>Register</Text>
             </Text>
           </TouchableOpacity>
+
+          <View style={styles.infoContainer}>
+            <Icon name="info" size={16} color="#999" />
+            <Text style={styles.infoText}>
+              {rememberMe ? 'You will stay logged in' : 'You will be logged out when you close the app'}
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -109,8 +135,27 @@ const styles = StyleSheet.create({
   form: {
     width: '100%',
   },
+  rememberContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 15,
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rememberText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 8,
+  },
+  forgotText: {
+    fontSize: 14,
+    color: '#d32f2f',
+  },
   loginButton: {
-    marginTop: 20,
+    marginTop: 10,
   },
   registerLink: {
     marginTop: 20,
@@ -123,5 +168,16 @@ const styles = StyleSheet.create({
   registerLinkText: {
     color: '#d32f2f',
     fontWeight: 'bold',
+  },
+  infoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+    gap: 5,
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#999',
   },
 });

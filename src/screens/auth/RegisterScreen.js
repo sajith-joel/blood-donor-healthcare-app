@@ -7,7 +7,8 @@ import {
   Platform,
   TouchableOpacity,
   Alert,
-  ScrollView
+  ScrollView,
+  Switch
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import InputField from '../../components/common/InputField';
@@ -24,9 +25,11 @@ export default function RegisterScreen({ navigation }) {
     confirmPassword: '',
     phone: '',
     bloodGroup: '',
-    userType: 'donor'
+    userType: 'donor',
+    address: ''
   });
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const { register } = useAuth();
 
   const handleRegister = async () => {
@@ -51,8 +54,9 @@ export default function RegisterScreen({ navigation }) {
       phone: formData.phone,
       bloodGroup: formData.bloodGroup,
       userType: formData.userType,
+      address: formData.address,
       createdAt: new Date().toISOString()
-    });
+    }, rememberMe);
     setLoading(false);
 
     if (!result.success) {
@@ -84,7 +88,7 @@ export default function RegisterScreen({ navigation }) {
               <Text style={[
                 styles.userTypeText,
                 formData.userType === 'donor' && styles.selectedUserTypeText
-              ]}>Donor</Text>
+              ]}>🩸 Donor</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -96,7 +100,7 @@ export default function RegisterScreen({ navigation }) {
               <Text style={[
                 styles.userTypeText,
                 formData.userType === 'hospital' && styles.selectedUserTypeText
-              ]}>Hospital</Text>
+              ]}>🏥 Hospital</Text>
             </TouchableOpacity>
           </View>
 
@@ -151,6 +155,16 @@ export default function RegisterScreen({ navigation }) {
             </>
           )}
 
+          {formData.userType === 'hospital' && (
+            <InputField
+              label="Hospital Address"
+              value={formData.address}
+              onChangeText={(text) => setFormData({ ...formData, address: text })}
+              placeholder="Enter hospital address"
+              multiline
+            />
+          )}
+
           <InputField
             label="Password"
             value={formData.password}
@@ -169,6 +183,19 @@ export default function RegisterScreen({ navigation }) {
             required
           />
 
+          {/* Remember Me Switch */}
+          <View style={styles.rememberContainer}>
+            <View style={styles.rememberRow}>
+              <Switch
+                value={rememberMe}
+                onValueChange={setRememberMe}
+                trackColor={{ false: '#767577', true: '#d32f2f' }}
+                thumbColor={rememberMe ? '#fff' : '#f4f3f4'}
+              />
+              <Text style={styles.rememberText}>Stay logged in</Text>
+            </View>
+          </View>
+
           <Button title="Register" onPress={handleRegister} style={styles.registerButton} />
 
           <TouchableOpacity
@@ -179,6 +206,12 @@ export default function RegisterScreen({ navigation }) {
               Already have an account? <Text style={styles.loginLinkText}>Login</Text>
             </Text>
           </TouchableOpacity>
+
+          <View style={styles.infoContainer}>
+            <Text style={styles.infoText}>
+              {rememberMe ? '✓ You will stay logged in even after closing the app' : 'ℹ️ You will be logged out when you close the app'}
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -264,13 +297,26 @@ const styles = StyleSheet.create({
   selectedBloodGroupText: {
     color: '#fff',
   },
+  rememberContainer: {
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rememberText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 8,
+  },
   registerButton: {
-    marginTop: 20,
+    marginTop: 10,
   },
   loginLink: {
     marginTop: 20,
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 10,
   },
   loginText: {
     fontSize: 14,
@@ -279,5 +325,15 @@ const styles = StyleSheet.create({
   loginLinkText: {
     color: '#d32f2f',
     fontWeight: 'bold',
+  },
+  infoContainer: {
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 30,
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
   },
 });
